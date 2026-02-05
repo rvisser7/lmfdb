@@ -359,6 +359,11 @@ def render_lattice_webpage(**args):
     info['dual_conway_symbol'] = format_conway_symbol(f_genus.get('dual_conway_symbol', ''))
     info['dual_label'] = f.get('dual_label', "not in database")
     if 'dual_theta_series' in f:
+        # Display either all coefficients up to q^20, or first 10 non-zero coefficients, whichever is longer
+        num_nonzero_coeffs = 0
+        for i in range(len(f['dual_theta_series'])):
+            if f['dual_theta_series'][i] != 0: num_nonzero_coeffs += 1
+
         coeff = [f['dual_theta_series'][i] for i in range(ncoeff + 1)]
         info['dual_theta_series'] = my_latex(print_q_expansion(coeff))
         info['dual_theta_display'] = url_for(".dual_theta_display", label=f['label'], number="")    
