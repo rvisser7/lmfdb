@@ -9,6 +9,8 @@ from copy import copy
 from itertools import islice
 from types import GeneratorType
 
+from PIL import Image, ImageChops
+
 from flask import make_response, flash, url_for, current_app
 from markupsafe import Markup, escape
 from werkzeug.utils import cached_property
@@ -947,8 +949,34 @@ def encode_plot(P, pad=None, pad_inches=0.1, remove_axes=False, axes_pad=None, f
         fig.tight_layout(pad=pad)
     fig.savefig(virtual_file, format='png', pad_inches=pad_inches, **kwds)
     virtual_file.seek(0)
-    buf = virtual_file.getbuffer()
+
+    
+    # --- AUTO-CROP WHITESPACE ---
+    img = Image.open(virtual_file).convert("RGBA")
+
+    # create background (fully transparent)
+    bg = Image.new("RGBA", img.size, (255, 255, 255, 0))
+
+    diff = ImageChops.difference(img, bg)
+    bbox = diff.getbbox()
+
+    if bbox:
+        img = img.crop(bbox)
+
+    # re-encode cropped image
+    out = IO()
+    img.save(out, format="PNG")
+    out.seek(0)
+
+    buf = out.getbuffer()
+    #return "data:image/png;base64," + quote(b64encode(buf))
+
+
+    #buf = virtual_file.getbuffer()
     return "data:image/png;base64," + quote(b64encode(buf))
+
+def encode_plot_svg():
+    return 0
 
 
 class WebObj:

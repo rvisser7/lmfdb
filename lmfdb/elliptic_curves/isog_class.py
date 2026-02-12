@@ -1,5 +1,5 @@
 from flask import url_for
-from lmfdb.utils import encode_plot, prop_int_pretty, raw_typeset, integer_squarefree_part, list_to_factored_poly_otherorder
+from lmfdb.utils import encode_plot, encode_plot_svg, prop_int_pretty, raw_typeset, integer_squarefree_part, list_to_factored_poly_otherorder
 from lmfdb.elliptic_curves import ec_logger
 from lmfdb.elliptic_curves.web_ec import split_lmfdb_label, split_cremona_label, OPTIMALITY_BOUND, CREMONA_BOUND
 from lmfdb.number_fields.web_number_field import field_pretty
@@ -128,8 +128,18 @@ class ECisog_class():
 
         self.graph = make_graph(M, [c['short_label'] for c in self.curves])
         P = self.graph.plot(edge_labels=True, vertex_size=1000)
+        pos = self.graph.get_pos()
+        print("*********", pos)
+        #axt = self.graph.get_axes_range()
+        #print("*********", axt)
+        ys = [p[1] for p in pos.values()]
+        #if max(ys) - min(ys) < 0.5:
+        #    mid = 0.5 * (max(ys) + min(ys))
+        #P.set_axes_range(ymin=min(ys), ymax=max(ys))
+        #assert(False)
+
         self.graph_img = encode_plot(P, transparent=True)
-        self.graph_link = '<img src="%s" width="200" height="150"/>' % self.graph_img
+        self.graph_link = '<img src="%s" width="200"/>' % self.graph_img   
 
         self.newform = raw_typeset(PowerSeriesRing(QQ, 'q')(classdata['anlist'], 20, check=True))
         self.newform_label = ".".join([str(self.conductor), str(2), 'a', self.iso_label])
@@ -228,6 +238,7 @@ def make_graph(M, vertex_labels=None):
         # one edge, two vertices.  We align horizontally and put
         # the lower number on the left vertex.
         G.set_pos(pos={0:[-0.5,0],1:[0.5,0]})
+        axes_limits = [-3, 3, -0.1, 0.1]
     else:
         maxdegree = max(max(MM))
         if n == 3:
@@ -235,11 +246,13 @@ def make_graph(M, vertex_labels=None):
             centervert = [i for i in range(3) if max(MM.row(i)) < maxdegree][0]
             other = [i for i in range(3) if i != centervert]
             G.set_pos(pos={centervert:[0,0],other[0]:[-1,0],other[1]:[1,0]})
+            axes_limits = [-3, 3, -0.1, 0.1]
         elif maxdegree == 4:
             # o--o<8
             centervert = [i for i in range(4) if max(MM.row(i)) < maxdegree][0]
             other = [i for i in range(4) if i != centervert]
             G.set_pos(pos={centervert:[0,0],other[0]:[0,1],other[1]:[-0.8660254,-0.5],other[2]:[0.8660254,-0.5]})
+            axes_limits = [-3, 3, -0.1, 0.1]
         elif maxdegree == 27:
             # o--o--o--o
             centers = [i for i in range(4) if list(MM.row(i)).count(3) == 2]
