@@ -822,6 +822,37 @@ download_makedata_comment = {
 
 
 def number_field_jump(info):
+    jump_input = info['jump'].strip()
+    
+    # Check if user provided a comma-separated list of fields
+    if ',' in jump_input:
+        # Parse each field and collect labels
+        fields = [f.strip() for f in jump_input.split(',')]
+        labels = []
+        failed_fields = []
+        
+        for field_str in fields:
+            try:
+                label = nf_string_to_label(field_str)
+                labels.append(label)
+            except (ValueError, Exception) as e:
+                failed_fields.append(field_str)
+        
+        if not labels and failed_fields:
+            # None of the fields could be parsed
+            flash_error(f"Could not parse any of the provided fields: {', '.join(failed_fields)}")
+            return redirect(url_for(".number_field_render_webpage"))
+        
+        if failed_fields:
+            # Some fields failed to parse
+            flash_info(f"Could not parse the following fields: {', '.join(failed_fields)}. "
+                      f"Showing results for: {', '.join(labels)}")
+        
+        # Redirect to search page with the labels query
+        labels_query = ','.join(labels)
+        return redirect(url_for(".number_field_render_webpage", lookup_labels=labels_query))
+    
+    # Original single field behavior
     query = {'label_orig': info['jump']}
     try:
         parse_nf_string(info, query, 'jump', name="Label", qfield='label')
@@ -916,6 +947,12 @@ class NFDownloader(Downloader):
                            ('Search results', '.')],
              learnmore=learnmore_list)
 def number_field_search(info, query):
+    # Handle multiple labels lookup from jump box
+    if 'lookup_labels' in info:
+        labels = [l.strip() for l in info['lookup_labels'].split(',') if l.strip()]
+        if labels:
+            query['label'] = {'$in': labels}
+    
     parse_posints(info,query,'degree')
     parse_galgrp(info,query, qfield=('galois_label', 'degree'))
     parse_bracketed_posints(info,query,'signature',qfield=('degree','r2'),exactlength=2, allow0=True, extractor=lambda L: (L[0]+2*L[1],L[1]))
@@ -1171,9 +1208,9 @@ class NFSearchArray(SearchArray):
              ("regulator", "regulator", ['regulator', 'degree', 'disc_abs', 'disc_sign', 'iso_number']),
              ("galois", "Galois group", ['degree', 'galt', 'disc_abs', 'disc_sign', 'iso_number'])]
     jump_example = "x^7 - x^6 - 3 x^5 + x^4 + 4 x^3 - x^2 - x + 1"
-    jump_egspan = r"e.g. 2.2.5.1, Qsqrt5, x^2-5, or x^2-x-1 for \(\Q(\sqrt{5})\)"
+    jump_egspan = r"e.g. 2.2.5.1, Qsqrt5, x^2-5, or a comma-separated list: 2.2.5.1, x^2-3, Qsqrt7"
     jump_knowl = "nf.search_input"
-    jump_prompt = "Label, name, or polynomial"
+    jump_prompt = "Label, name, polynomial, or comma-separated list"
 
     def __init__(self):
         degree = TextBox(
