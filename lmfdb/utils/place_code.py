@@ -44,7 +44,9 @@ class CodeSnippet():
         snippet_str = self.pre # initiate new string
         code = self.code
         if code[item]:
-            for L in code[item]:
+            for L in self.langs:
+                if L not in code[item]:
+                    continue
                 if isinstance(code[item][L],str):
                     lines = code[item][L].split('\n')[:-1] if '\n' in code[item][L] else [code[item][L]]
                     lines = [line.replace("<", "&lt;").replace(">", "&gt;") for line in lines]

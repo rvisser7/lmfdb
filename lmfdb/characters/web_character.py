@@ -42,6 +42,9 @@ The design is the following:
 
 """
 
+import os
+import yaml
+
 from flask import url_for
 from collections import defaultdict
 from sage.databases.cremona import cremona_letter_code
@@ -159,12 +162,34 @@ class WebCharObject():
         code = yaml.load(open(os.path.join(_curdir, "code.yaml")), Loader=yaml.FullLoader)
         code['show'] = { lang:'' for lang in code['prompt'] }
 
-        data = {'modulus': self.modulus, 'number' : self.number, 'zeta_order' : self.chi.sage_zeta_order(self.order)}
+        data = {
+            'modulus': self.modulus, 
+            'zeta_order': self.chi.sage_zeta_order(self.order) if hasattr(self, 'chi') and hasattr(self.chi, 'sage_zeta_order') else 1
+        }
+        
+        # Add number only if it's available (not for orbits)
+        if hasattr(self, 'number') and self.number is not None:
+            data['number'] = self.number
         
         for prop in code:
-            for lang in code[prop]:
-                code[prop][lang] = code[prop][lang].format(**data)
+            if isinstance(code[prop], dict) and prop != 'show':
+                for lang in code[prop]:
+                    if isinstance(code[prop][lang], str):
+                        try:
+                            code[prop][lang] = code[prop][lang].format(**data)
+                        except KeyError:
+                            # Skip snippets that require data we don't have
+                            pass
         return code
+
+    def __getattr__(self, name):
+        """Allow access to code snippets via codename attributes"""
+        if name.startswith('code'):
+            snippet_name = name[4:]  # Remove 'code' prefix
+            code = self.code_snippets()
+            if snippet_name in code:
+                return code[snippet_name]
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
 #############################################################################
 ###  Dirichlet type

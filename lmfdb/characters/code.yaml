@@ -28,13 +28,12 @@ frontmatter:
   all: |
     {lang} code for working with Dirichlet character {label}
 
-character_init:
+init:
   comment: Define the Dirichlet character
   sage: |
     from sage.modular.dirichlet import DirichletCharacter
-    H = DirichletGroup({modulus}, base_ring=CyclotomicField({zeta_order}))
-    M = H._module
-    chi = DirichletCharacter(H, M([{sage_format}]))
+    H = DirichletGroup({modulus})
+    chi = H[{number}]
   pari: |
     [g,chi] = znchar(Mod({number}, {modulus}))
   magma: |
@@ -47,19 +46,19 @@ modulus:
   pari: modulus(chi)
   magma: Modulus(chi);
 
-conductor:
+cond:
   comment: Conductor
   sage: chi.conductor()
   pari: znconreyconductor(g,chi)
   magma: Conductor(chi);
 
 order:
-  coment: Order
+  comment: Order
   sage: chi.multiplicative_order()
   pari: charorder(g,chi)
   magma: Order(chi);
 
-is_primitive:
+isprimitive:
   comment: If the character is primitive
   sage: chi.is_primitive()
   pari: #znconreyconductor(g,chi)==1
@@ -70,12 +69,6 @@ parity:
   sage: chi.is_odd()
   pari: zncharisodd(g,chi)
   magma: IsOdd(chi);
-
-kronecker_symbol:
-  comment: Kronecker symbol
-  sage: kronecker_character({symbol_num})
-  pari: znchartokronecker(g,chi)
-  magma: KroneckerCharacter({symbol_num});
 
 galois_orbit:
   comment: Galois orbit
@@ -99,13 +92,13 @@ kloosterman_sum:
 
 value:
   comment: Value of chi at x
-  sage: chi(x) # x integer
-  pari: chareval(g,chi,x) \\\\ x integer, value in Q/Z'
-  magma: chi(x)
+  sage: chi(x)
+  pari: chareval(g,chi,x)
+  magma: chi(x);
 
 
 # Code snippets for Dirichlet character group
-character_group:
+group_init:
   comment: Define the Dirichlet group
   sage: G = DirichletGroup({modulus})
   pari: g = idealstar(,{modulus},2)
