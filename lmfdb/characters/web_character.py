@@ -44,6 +44,7 @@ The design is the following:
 
 import os
 import yaml
+from functools import lru_cache
 
 from flask import url_for
 from collections import defaultdict
@@ -76,6 +77,7 @@ def compute_values(chi, groupelts):
     return [[k, int(chi.conreyangle(k) * chi.order)] for k in groupelts]
 
 
+@lru_cache(maxsize=128)
 def valuefield_from_order(order):
     order2 = order if order % 4 != 2 else order / 2
     nf = WebNumberField.from_cyclo(order2)
