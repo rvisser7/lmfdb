@@ -1,5 +1,6 @@
 from lmfdb.tests import LmfdbTest
 from lmfdb.utils.search_parsing import nf_string_to_label, nf_string_to_min_poly
+from lmfdb.number_fields.web_number_field import field_pretty
 
 class NumberFieldTest(LmfdbTest):
     # All tests should pass
@@ -80,6 +81,24 @@ class NumberFieldTest(LmfdbTest):
     def test_url_phi_symbol_support(self):
         self.assertEqual(nf_string_to_min_poly('phi'), nf_string_to_min_poly('(1+sqrt(5))/2'))
         self.assertEqual(nf_string_to_label('Q(phi)'), nf_string_to_label('Qsqrt5'))
+
+    def test_field_pretty_triquadratic(self):
+        label = nf_string_to_label('Q(sqrt2,sqrt3,sqrt5)')
+        self.assertEqual(field_pretty(label), r'\(\Q(\sqrt{2}, \sqrt{3}, \sqrt{5})\)')
+
+    def test_field_pretty_quartic_nested_radical(self):
+        label = nf_string_to_label('Q(sqrt(3+sqrt2))')
+        self.assertEqual(field_pretty(label), r'\(\Q(\sqrt{3 + \sqrt{2}})\)')
+
+    def test_field_pretty_pure_cubic(self):
+        label = nf_string_to_label('Qcbrt2')
+        self.assertEqual(field_pretty(label), r'\(\Q(\sqrt[3]{2})\)')
+
+    def test_field_pretty_pure_higher_degree(self):
+        label4 = nf_string_to_label('x^4-2')
+        label5 = nf_string_to_label('x^5-2')
+        self.assertEqual(field_pretty(label4), r'\(\Q(\sqrt[4]{2})\)')
+        self.assertEqual(field_pretty(label5), r'\(\Q(\sqrt[5]{2})\)')
 
     def test_arith_equiv(self):
         self.check_args('/NumberField/7.3.6431296.1', '7.3.6431296.2') # arith equiv field

@@ -210,6 +210,62 @@ def is_fundamental_discriminant(d):
         return d % 16 in [8, 12] and integer_is_squarefree(d // 4)
 
 
+def _quadratic_label_to_sqrt_arg(label):
+    """Return d for Q(sqrt(d)) from a quadratic label, or None if not quadratic."""
+    parts = str(label).split('.')
+    if len(parts) != 4 or parts[0] != '2':
+        return None
+    # Recover signed squarefree d from signature/discriminant in the label.
+    d = integer_squarefree_part(ZZ(parts[2]))
+    d *= (-1) ** (1 + int(parts[1]) // 2)
+    return ZZ(d)
+
+
+def _sqrt_symbol(d):
+    return 'i' if d == -1 else r'\sqrt{%d}' % d
+
+
+def _f2_rank(vectors):
+    basis = {}
+    for v in vectors:
+        x = int(v)
+        while x:
+            lead = x.bit_length() - 1
+            if lead in basis:
+                x ^= basis[lead]
+            else:
+                basis[lead] = x
+                break
+    return len(basis)
+
+
+def _squareclass_vector(d, primes):
+    v = 0
+    n = ZZ(d)
+    if n < 0:
+        v |= 1
+        n = -n
+    for i, p in enumerate(primes, start=1):
+        if n % p == 0:
+            v ^= (1 << i)
+    return v
+
+
+def _choose_independent_squareclasses(ds, k):
+    ds = sorted(set(ZZ(d) for d in ds), key=lambda x: (abs(x), x < 0, x))
+    primes = sorted({int(p) for d in ds for p in ZZ(abs(d)).prime_divisors()})
+    chosen = []
+    vecs = []
+    for d in ds:
+        v = _squareclass_vector(d, primes)
+        if _f2_rank(vecs + [v]) > _f2_rank(vecs):
+            chosen.append(d)
+            vecs.append(v)
+            if len(chosen) == k:
+                return chosen
+    return []
+
+
 @cached_function
 def field_pretty(label):
     d, r, D, _ = label.split('.')
@@ -225,6 +281,35 @@ def field_pretty(label):
         return r'\(\Q(\sqrt{' + str(D if D % 4 else D/4) + r'}) \)'
     if label in cycloinfo:
         return r'\(\Q(\zeta_{%d})\)' % cycloinfo[label]
+    # Pure fields with defining polynomial x^n - m (n >= 3).
+    # This includes pure cubic fields, displayed as Q(\sqrt[3]{m}).
+    if ZZ(d) >= 3:
+        wnf = WebNumberField(label)
+        if wnf._data is not None:
+            coeffs = wnf.poly().coefficients(sparse=False)
+            n = len(coeffs) - 1
+            if n >= 3 and coeffs[n] == 1 and all(c == 0 for c in coeffs[1:n]):
+                m = -ZZ(coeffs[0])
+                if m != 0:
+                    return r'\(\Q(\sqrt[%d]{%d})\)' % (n, m)
+    if d == '8':
+        # Triquadratic fields Q(sqrt(a), sqrt(b), sqrt(c))
+        wnf = WebNumberField(label)
+        subs = wnf.subfields()
+        quad_ds = []
+        for sf, _ in subs:
+            sub = wnf.from_coeffs(string2list(str(sf)))
+            if sub is not None and sub._data is not None and sub.degree() == 2:
+                dsub = _quadratic_label_to_sqrt_arg(sub.get_label())
+                if dsub not in [None, 0, 1]:
+                    quad_ds.append(dsub)
+        quad_ds = sorted(set(quad_ds), key=lambda x: (abs(x), x < 0, x))
+        # C2 x C2 x C2 has exactly 7 distinct quadratic subfields.
+        if len(quad_ds) == 7:
+            gens = _choose_independent_squareclasses(quad_ds, 3)
+            if len(gens) == 3:
+                labels_str = [_sqrt_symbol(z) for z in gens]
+                return r'\(\Q(%s, %s, %s)\)' % (labels_str[0], labels_str[1], labels_str[2])
     if d == '4':
         wnf = WebNumberField(label)
         subs = wnf.subfields()
@@ -241,6 +326,26 @@ def field_pretty(label):
                 labels_str = ['i' if z == -1 else r'\sqrt{%d}' % z
                               for z in labels_values]
                 return r'\(\Q(%s, %s)\)' % (labels_str[0], labels_str[1])
+        # Quartic fields with one quadratic subfield and x^4 - 2a*x^2 + (a^2-d)
+        # are displayed as Q(sqrt(a + sqrt(d))) when d is squarefree.
+        quad_ds = []
+        for sf, _ in subs:
+            sub = wnf.from_coeffs(string2list(str(sf)))
+            if sub is not None and sub._data is not None and sub.degree() == 2:
+                dsub = _quadratic_label_to_sqrt_arg(sub.get_label())
+                if dsub not in [None, 0, 1]:
+                    quad_ds.append(dsub)
+        quad_ds = sorted(set(quad_ds), key=lambda x: (abs(x), x < 0, x))
+        if len(quad_ds) == 1:
+            coeffs = wnf.poly().coefficients(sparse=False)
+            if len(coeffs) == 5 and coeffs[1] == 0 and coeffs[3] == 0 and coeffs[4] == 1:
+                a = -QQ(coeffs[2]) / 2
+                d0 = a * a - QQ(coeffs[0])
+                if a in ZZ and d0 in ZZ:
+                    a = ZZ(a)
+                    d0 = ZZ(d0)
+                    if a != 0 and d0 not in [0, 1] and integer_squarefree_part(d0) == quad_ds[0]:
+                        return r'\(\Q(\sqrt{%d + %s})\)' % (a, _sqrt_symbol(quad_ds[0]))
     if label in rcycloinfo:
         return r'\(\Q(\zeta_{%d})^+\)' % rcycloinfo[label]
     return label
