@@ -266,6 +266,102 @@ def _choose_independent_squareclasses(ds, k):
     return []
 
 
+def _try_quartic_nested_radical_by_structure(wnf, d_quad):
+    """
+    Attempt to express a quartic field as Q(√(A + B√d_quad)) by analyzing field structure
+    when the stored polynomial isn't in standard form.
+    
+    Returns (a, b, d, pretty_string) or None if detection fails.
+    """
+    try:
+        from sage.rings.polynomial.polynomial_ring_constructor import PolynomialRing
+        from sage.rings.number_field.number_field import NumberField
+        
+        # Create Sage field to compute with
+        k_poly = wnf.poly()
+        R = PolynomialRing(QQ, 'x')
+        K = NumberField(k_poly, 'alpha')
+        
+        # Create the quadratic subfield Q(√d_quad)
+        d_val = ZZ(d_quad)
+        if d_val > 0:
+            sqrt_poly = R([d_val, 0, 1])
+        else:
+            sqrt_poly = R([-d_val, 0, 1])
+        
+        try:
+            F = NumberField(sqrt_poly, 'sqrtd')
+        except:
+            return None
+        
+        # Get a generator of K
+        alpha = K.gen()
+        
+        # For a field K = Q(√(A + B√d)), we need to find an element γ such that
+        # γ^2 = A + B√d ∈ F.
+        # Try alpha and linear combinations of basis elements
+        
+        basis = K.basis()
+        candidates = [basis[0] + c * basis[1] for c in [-1, 0, 1, 2]]
+        candidates.append(alpha)
+        
+        for gamma in candidates:
+            gamma_sq = gamma * gamma
+            
+            # Try to express gamma_sq as A + B*sqrt(d) by computing minimal poly
+            # Get Galois conjugates of gamma_sq over Q
+            # If gamma_sq is in F = Q(√d), it has exactly 2 conjugates: A + B√d and A - B√d
+            # So its minimal polynomial over Q should split into two linear factors over F
+            
+            try:
+                min_gamma_sq = gamma_sq.minpoly()
+                
+                # For γ^2 to be in F = Q(√d), its minimal polynomial over Q
+                # should be (x - (A + B√d))(x - (A - B√d)) = x^2 - 2Ax + (A^2 - B^2*d)
+                if min_gamma_sq.degree() == 2:
+                    coeffs = min_gamma_sq.coefficients(sparse=False)
+                    if len(coeffs) == 3 and coeffs[2] == 1:
+                        # Minimal poly is x^2 + b*x + c
+                        b = QQ(coeffs[1])
+                        c = QQ(coeffs[0])
+                        
+                        # Convert to monic: -b is the sum of roots, c is the product
+                        # So A = -b/2 (assuming this is correct for A)
+                        # And (A^2 - B^2*d) = c
+                        # Also d_quad = B^2*d equation needs to be solved
+                        
+                        # Alternatively: roots are A ± B√d
+                        # Try to find A and B
+                        root1 = (-b + (b*b - 4*c).sqrt()) / 2
+                        root2 = (-b - (b*b - 4*c).sqrt()) / 2
+                        
+                        # If this is A ± B√d, then midpoint is A
+                        A_candidate = (root1 + root2) / 2
+                        
+                        if A_candidate in QQ:
+                            A = ZZ(A_candidate) if A_candidate in ZZ else None
+                            if A is not None:
+                                # Try to recover B by computing (A^2 - c) / d
+                                B_sq_d = A*A - c
+                                if B_sq_d in QQ:
+                                    B_sq_d = QQ(B_sq_d)
+                                    if B_sq_d % d_val == 0:
+                                        B_sq = B_sq_d / d_val
+                                        if B_sq > 0 and B_sq in QQ:
+                                            B = ZZ(B_sq.sqrt()) if B_sq.is_perfect_power(2) else None
+                                            if B is not None and B > 0:
+                                                # Verify this works
+                                                return (ZZ(A), ZZ(B), ZZ(d_val), 
+                                                        r'\(\Q(\sqrt{%d + %s\sqrt{%d}})\)' % (A, B, d_val))
+            except:
+                pass
+        
+        return None
+        
+    except:
+        return None
+
+
 @cached_function
 def field_pretty(label):
     d, r, D, _ = label.split('.')
@@ -337,7 +433,9 @@ def field_pretty(label):
                     quad_ds.append(dsub)
         quad_ds = sorted(set(quad_ds), key=lambda x: (abs(x), x < 0, x))
         if len(quad_ds) == 1:
+            # Try direct polynomial check first: x^4 - 2a*x^2 + (a^2 - d)
             coeffs = wnf.poly().coefficients(sparse=False)
+            result = None
             if len(coeffs) == 5 and coeffs[1] == 0 and coeffs[3] == 0 and coeffs[4] == 1:
                 a = -QQ(coeffs[2]) / 2
                 d0 = a * a - QQ(coeffs[0])
@@ -345,7 +443,16 @@ def field_pretty(label):
                     a = ZZ(a)
                     d0 = ZZ(d0)
                     if a != 0 and d0 not in [0, 1] and integer_squarefree_part(d0) == quad_ds[0]:
-                        return r'\(\Q(\sqrt{%d + %s})\)' % (a, _sqrt_symbol(quad_ds[0]))
+                        result = r'\(\Q(\sqrt{%d + %s})\)' % (a, _sqrt_symbol(quad_ds[0]))
+            
+            # If direct check failed, try structural approach via element's minimal poly
+            if result is None:
+                result = _try_quartic_nested_radical_by_structure(wnf, quad_ds[0])
+                if result is not None:
+                    a, b, d, pretty = result
+                    return pretty
+            elif result is not None:
+                return result
     if label in rcycloinfo:
         return r'\(\Q(\zeta_{%d})^+\)' % rcycloinfo[label]
     return label
