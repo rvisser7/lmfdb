@@ -30,9 +30,13 @@ class NumberFieldTest(LmfdbTest):
 
     def test_search_zeta(self):
         self.check_args('/NumberField/?jump=Qzeta23&search=Go', '[3]') # class group
+        self.check_args('/NumberField/?jump=Qzeta_23&search=Go', '[3]') # class group
+        self.check_args('/NumberField/?jump=qzeta23%2B&search=Go', '1014.3133') # regulator
+        self.check_args('/NumberField/?jump=qzeta_23%2B&search=Go', '1014.3133') # regulator
 
     def test_search_sqrt(self):
         self.check_args('/NumberField/?jump=Qsqrt-163&search=Go', '41') # minpoly
+        self.check_args('/NumberField/?jump=q(sqrt-163)&search=Go', '41') # minpoly
 
     def test_search_multiple_fields(self):
         # Test comma-separated list of field labels
@@ -50,6 +54,18 @@ class NumberFieldTest(LmfdbTest):
 
     def test_url_naturallabel(self):
         self.check_args('/NumberField/Qsqrt5', '0.481211825') # regulator
+
+    def test_url_naturallabel_custom(self):
+        # Test various different custom nicknames for number fields
+        self.check_args('/NumberField/Qi', '2.0.4.1')
+        self.check_args('/NumberField/Qphi', '2.2.5.1')
+        self.check_args('/NumberField/Qcbrt2', '3.1.108.1')
+        self.check_args('/NumberField/Q(sqrt2+sqrt3)', '4.4.2304.1')
+        self.check_args('/NumberField/Q(sqrt2,sqrt3)', '4.4.2304.1')
+        self.check_args('/NumberField/Q(sqrt(1 + sqrt2))', '4.2.1024.1')
+        self.check_args('/NumberField/Q(sqrt2,sqrt3,cbrt2)', '12.4.320979616137216.3')
+        self.check_args('/NumberField/Q(sqrt2,-sqrt2)', '2.2.8.1')
+        self.check_args('/NumberField/Q(sqrt2-sqrt2)', '1.1.1.1')
 
     def test_arith_equiv(self):
         self.check_args('/NumberField/7.3.6431296.1', '7.3.6431296.2') # arith equiv field
