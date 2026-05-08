@@ -226,7 +226,7 @@ def field_pretty(label):
     # Case 1: The rationals Q
     if d == '1':  # Q
         return r'\(\Q\)'
-    
+
     # Converts LMFDB label for quadratic field K to the D in K = Q(sqrt(D))
     def _quad_label_to_D(quad_label):
         parts = str(quad_label).split('.')
@@ -247,17 +247,21 @@ def field_pretty(label):
         if not is_fundamental_discriminant(D):
             return label
         return r'\(\Q(\sqrt{' + str(D if D % 4 else D/4) + r'}) \)'
-    
+
     # Case 3: Cyclotomic fields Q(\zeta_N)
     if label in cycloinfo:
         return r'\(\Q(\zeta_{%d})\)' % cycloinfo[label]
-    
-    # Case 4: Imprimitive quartic fields
+
+    # Case 4: Maximal real subfields of cyclotomic fields Q(\zeta_N)^+
+    if label in rcycloinfo:
+        return r'\(\Q(\zeta_{%d})^+\)' % rcycloinfo[label]
+
+    # Case 5: Imprimitive quartic fields
     if d == '4':
         wnf = WebNumberField(label)
         subs = wnf.subfields()
 
-        # Case 4a: Biquadratic fields Q(\sqrt{A}, \sqrt{B})
+        # Case 5a: Biquadratic fields Q(\sqrt{A}, \sqrt{B})
         if len(subs) == 3:  # only for V_4 fields
             subs = [wnf.from_coeffs(string2list(str(z[0]))) for z in subs]
             # Abort if we don't know one of these fields
@@ -270,8 +274,8 @@ def field_pretty(label):
                 labels_values = [z[0] * (-1)**(1 + z[1] / 2) for z in labels]
                 labels_str = [_sqrt_symbol(z) for z in labels_values]
                 return r'\(\Q(%s, %s)\)' % (labels_str[0], labels_str[1])
-            
-        # Case 4b: Imprimitive quartic fields of type Q(\sqrt(A + B*\sqrt(D)))
+
+        # Case 5b: Imprimitive quartic fields of type Q(\sqrt(A + B*\sqrt(D)))
         if len(subs) == 1:
             quad_sub = wnf.from_coeffs(string2list(str(subs[0][0])))
             if not quad_sub._data is None:
@@ -279,8 +283,8 @@ def field_pretty(label):
                 quad_label = str(quad_sub.get_label())
                 D = _quad_label_to_D(quad_label)
                 Ksub = QuadraticField(D, 'sqrtD')
-                sqrtD = Ksub._first_ngens(1)[0]
-                
+                sqrtD = Ksub.gen(0)
+
                 # Factorise defining polynomial for K over Q(sqrt(D))
                 Rsub = PolynomialRing(Ksub, 'x')
                 relative_poly = Rsub(wnf.poly()).factor()[0][0]
@@ -303,19 +307,15 @@ def field_pretty(label):
                     B_str = "+" if B == 1 else "-" if B == -1 else f"{B:+d}"
                     return r'\(\Q(\sqrt{%d %s %s})\)' % (A, B_str, _sqrt_symbol(D))
 
-    # Case 5: Maximal real subfields of cyclotomic fields Q(\zeta_N)^+
-    if label in rcycloinfo:
-        return r'\(\Q(\zeta_{%d})^+\)' % rcycloinfo[label]
-    
     # Case 6: Pure cubic fields Q(\sqrt[3]{N})
     if d == '3':
         wnf = WebNumberField(label)
         # Check that discriminant is negative
         if wnf.disc() < 0:
             # Explicitly solve for a real root of defining polynomial (using Cardano's formula):
-            d, c, b, a = wnf.poly().coefficients(sparse=False)
+            e, c, b, a = wnf.poly().coefficients(sparse=False)
             p = (3*a*c - b**2)/(3*a**2)
-            q = (2*b**3 - 9*a*b*c + 27*a**2*d)/(27*a**3)
+            q = (2*b**3 - 9*a*b*c + 27*a**2*e)/(27*a**3)
             r = (q**2)/4 + (p**3)/27   # r is positive if disc negative
 
             # A real root is (-q/2 + sqrt(r))^{1/3} + (-q/2 - sqrt(r))^{1/3}
@@ -325,7 +325,7 @@ def field_pretty(label):
                 r1, r2 = min(r1,r2), max(r1,r2)
 
                 # Check if (-q/2+sqrt(r))^{1/3} and (-q/2-sqrt(r))^{1/3} generate the same cubic field
-                if r1.is_zero() or (all([(pp[1]%3==0) for pp in (r1*r2).factor()])):
+                if r1.is_zero() or (all([(pp[1]%3 == 0) for pp in (r1*r2).factor()])):
                     D = r1 if r1 > 0 else r2
                     D = ZZ(prod([pp[0]**(pp[1]%3) for pp in D.factor()]))  # Get cubefree part
                     # If square, can take square root
@@ -345,25 +345,30 @@ def field_pretty(label):
             all_Ds = [_quad_label_to_D(qlabel) for qlabel in quad_labels]
 
             # Sort the Ds by absolute value (in case of tie, put positive Ds first)
-            sorted_Ds = sorted(all_Ds, key = lambda x: (abs(x), -x))
+            sorted_Ds = sorted(all_Ds, key=lambda x: (abs(x), -x))
             final_Ds = []
 
             # Compute set of all primes dividing the Ds
             primes = sorted({int(p) for D in all_Ds for p in ZZ(abs(D)).prime_divisors()})
 
-            # Keep track of prime exponents used so far
+            # Keep track of prime exponents and row space used so far
             all_prime_exponents = []
+            row_space = matrix(GF(2), all_prime_exponents).row_space()
 
             for D in sorted_Ds:
                 # Convert D to a vector of prime exponents mod 2 (including sign)
                 prime_exp = [int(D < 0)]+[D.valuation(p)%2 for p in primes]
-                if vector(prime_exp) not in matrix(GF(2), all_prime_exponents).row_space():
-                    all_prime_exponents.append(prime_exp)
+                if vector(prime_exp) not in row_space:
                     final_Ds.append(D)
 
                     # Break out once rank is full
                     if len(final_Ds) == k:
                         break
+
+                    # Recompute row space
+                    all_prime_exponents.append(prime_exp)
+                    row_space = matrix(GF(2), all_prime_exponents).row_space()
+
             return r'\(\Q('+', '.join([_sqrt_symbol(D) for D in final_Ds])+r')\)'
 
     # Otherwise, if no latex form found, just return the LMFDB label

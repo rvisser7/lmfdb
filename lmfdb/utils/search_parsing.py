@@ -1374,7 +1374,7 @@ def nf_string_to_label(FF):
 
     Examples: Q, Qsqrt2, Qsqrt-4, Qzeta5, Q(sqrt2+sqrt3), Qcbrt2, Q(sqrt(2 + 3*sqrt2)), Q(sqrt2, cbrt3), Q(2^(1/5)), etc.
     """
-    
+
     # Check if the rationals Q or Q(i)
     if FF in ["q", "Q"]:
         return "1.1.1.1"
@@ -1429,7 +1429,7 @@ def nf_string_to_label(FF):
                 d /= 2  # Q(zeta_6)=Q(zeta_3), etc)
 
             # Check if matches maximal real subfield of a cyclotomic field
-            if match_obj.group(2):  
+            if match_obj.group(2):
                 from lmfdb.number_fields.web_number_field import rcyclolookup
 
                 if d in rcyclolookup:
@@ -1452,7 +1452,7 @@ def nf_string_to_label(FF):
         pieces = [piece.strip() for piece in Fstrip.split(",")]
         if any(not piece for piece in pieces):
             raise SearchParsingError("Empty generator in comma-separated field nickname.")
-        
+
         from sage.rings.qqbar import number_field_elements_from_algebraics
         alphas = [_nf_string_to_qqbar(piece) for piece in pieces]
         K, _, _ = number_field_elements_from_algebraics(alphas)

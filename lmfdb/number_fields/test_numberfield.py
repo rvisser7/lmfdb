@@ -40,7 +40,7 @@ class NumberFieldTest(LmfdbTest):
 
     def test_search_multiple_fields(self):
         # Test comma-separated list of field labels
-        self.check_args('/NumberField/?jump=2.2.5.1%2c+3.3.49.1&search=Go', '2.2.5.1') 
+        self.check_args('/NumberField/?jump=2.2.5.1%2c+3.3.49.1&search=Go', '2.2.5.1')
         self.check_args('/NumberField/?jump=2.2.5.1%2c+3.3.49.1&search=Go', '3.3.49.1')
         # Test comma-separated list with different input formats
         self.check_args('/NumberField/?jump=Qsqrt5%2c+x%5E2-3&search=Go', '2.2.5.1')
@@ -101,13 +101,14 @@ class NumberFieldTest(LmfdbTest):
         # Test "prettified" latex labels for number fields
         self.check_args('/NumberField/1.1.1.1', r'\Q')
         self.check_args('/NumberField/2.0.4.1', r'\Q(\sqrt{-1})')
-        self.check_args('/NumberField/4.4.2304.1', r'\Q(\sqrt{2}, \sqrt{3})')
+        self.check_args('/NumberField/4.4.1600.1', r'\Q(\sqrt{2}, \sqrt{5})')
         self.check_args('/NumberField/6.0.16807.1', r'\Q(\zeta_{7})')
         self.check_args('/NumberField/3.3.49.1', r'\Q(\zeta_{7})^+')
         self.check_args('/NumberField/3.1.300.1', r'\Q(\sqrt[3]{10})')
         self.check_args('/NumberField/4.2.2048.1', r'\Q(\sqrt[4]{2})')
-        self.check_args('/NumberField/4.4.2048.1', r'\Q(\sqrt{2 + \sqrt{2}})')
         self.check_args('/NumberField/4.0.512.1', r'\Q(\sqrt{1 + i})')
+        self.check_args('/NumberField/4.2.1024.1', r'\Q(\sqrt{1 + \sqrt{2}})')
+        self.check_args('/NumberField/4.0.2048.2', r'\Q(\sqrt{-2 + \sqrt{2}})')
         self.check_args('/NumberField/8.8.3317760000.1', r'\Q(\sqrt{2}, \sqrt{3}, \sqrt{5})')
         self.check_args('/NumberField/16.0.11007531417600000000.1', r'\Q(i, \sqrt{2}, \sqrt{3}, \sqrt{5})')
 

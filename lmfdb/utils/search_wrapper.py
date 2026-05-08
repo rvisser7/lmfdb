@@ -9,7 +9,7 @@ from sage.misc.cachefunc import cached_function
 
 from lmfdb.app import app, ctx_proc_userdata, is_debug_mode
 from lmfdb.utils.search_parsing import parse_start, parse_count, SearchParsingError
-from lmfdb.utils.utilities import flash_error, flash_info, flash_success, to_dict
+from lmfdb.utils.utilities import flash_error, flash_warning, flash_info, flash_success, to_dict
 from lmfdb.utils.completeness import results_complete
 
 # For diagram search support in SearchWrapper:
@@ -69,8 +69,8 @@ def split_top_level_commas(text):
     return entries
 
 
-def multi_entry_jump_search(info, parse_entry, label_exists, index_endpoint, input_key="jump", labels_key="labels", 
-                            sep=split_top_level_commas, object_name="records", time_limit=30):
+def multi_entry_jump_search(info, parse_entry, label_exists, index_endpoint, input_key="jump", labels_key="labels",
+                            sep=split_top_level_commas, object_name="records", time_limit=20):
     """
     Generic handler for jump boxes that supports comma-separated input of various entries (labels/names/polynomials/equations etc.).
 
@@ -87,7 +87,7 @@ def multi_entry_jump_search(info, parse_entry, label_exists, index_endpoint, inp
     - ``labels_key`` -- the dictionary key for the labels search query (default: "labels")
     - ``sep`` -- A function used to separate out jump box input into separate entries (default: split_top_level_commas)
     - ``object_name`` -- The name of the objects in the database (e.g. "fields", "elliptic curves"). Used when flashing info or error messages.
-    - ``time_limit`` -- a time limit (in seconds) for the maximum amount of time this query should take (default: 30)
+    - ``time_limit`` -- a time limit (in seconds) for the maximum total amount of time this query should take (default: 20)
     """
 
     jump_input = info.get(input_key, "")
@@ -97,16 +97,16 @@ def multi_entry_jump_search(info, parse_entry, label_exists, index_endpoint, inp
 
     # For each entry given in the comma-separated jump box input, we attempt to parse the entry using parse_entry (while skipping duplicates)
     # If the user inputs a large number of entries, this may take a long time (e.g. for number fields, this might require calling Pari's polredabs on every entry)
-    # We start a timer and stop parsing entries if we've hit the specified time_limit (default: 30 seconds)
+    # We start a timer, and stop parsing entries if after parsing i entries, it's predicted that parsing i+1 entries will exceed the time_limit (default: 20 seconds)
 
     labels, seen = [], set()
     not_parsed, not_found = 0, 0
     start_timer = time.monotonic()
     for i in range(len(entries)):
-        # Check if exceeded time limit
-        if time.monotonic() - start_timer > time_limit:
-            flash_error("Query timed out after parsing the first %s entries in the input.", i)
-            return redirect(url_for(index_endpoint))
+        # Check if doing the (i+1)-th entry will exceed the time limit
+        if (i > 0) and (time.monotonic() - start_timer > (i*time_limit)/(i+1)):
+            flash_warning("Search query timed out after processing the first %s out of %s entries in the input box. Only the first %s entries are included in the search results below.", i, len(entries), i)
+            break
 
         # Attempt to parse entry
         try:
@@ -121,7 +121,7 @@ def multi_entry_jump_search(info, parse_entry, label_exists, index_endpoint, inp
             labels.append(label)
             seen.add(label)
 
-    # Flash error if no entries successfully parsed
+    # Flash error and return index page if no entries successfully parsed
     if not labels:
         flash_error("None of the %s entries matched %s in the database.", len(entries), object_name)
         return redirect(url_for(index_endpoint))
@@ -140,7 +140,9 @@ def multi_entry_jump_search(info, parse_entry, label_exists, index_endpoint, inp
 def parse_labels(info, query, table, labels_key="labels"):
     """
     Parse a list of labels from the URL "?labels=" query into a database query.
+    Mainly used when multiple entries are given in the search jump box.
     """
+
     labels_input = info.get(labels_key)
     if not labels_input or not hasattr(table, "_label_col"):
         return
