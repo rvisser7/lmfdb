@@ -853,6 +853,8 @@ def number_field_jump(info):
 #    return render_template("number_field_algebra.html", info=info, title=t, bread=bread)
 
 nf_columns = SearchColumns([
+    ProcessedCol("label", "nf.label", "Pretty Label",
+                 lambda label: '<a href="%s">%s</a>' % (url_for_label(label), field_pretty(label))),
     ProcessedCol("label", "nf.label", "Label",
                  lambda label: '<a href="%s">%s</a>' % (url_for_label(label), nf_label_pretty(label))),
     PolynomialCol("coeffs", "nf.defining_polynomial", "Polynomial"),
