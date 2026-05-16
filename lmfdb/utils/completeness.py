@@ -1321,7 +1321,7 @@ class BianchiBound(ColTest):
                 ([121, 159], 100),
                 ([160, 163], 5000), # 163
                 ([164, 702], 100), # 703 is the first missing
-            ])
+            ]) 
             if M is None or not N.bounded(M):
                 return False, None, None
             return True, reason(n, r, D, M), caveat
