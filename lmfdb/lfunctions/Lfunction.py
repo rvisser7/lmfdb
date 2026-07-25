@@ -719,6 +719,7 @@ class Lfunction_from_db(Lfunction):
             'number': getattr(self, 'characternumber', ''),
         }
 
+
         if hasattr(self, 'lfunc_data') and self.lfunc_data:
             data['ainvs'] = self.lfunc_data.get('ainvs', data['ainvs'])
 
@@ -727,16 +728,40 @@ class Lfunction_from_db(Lfunction):
                 label_bits = self.label.split('-')
                 if len(label_bits) >= 3 and label_bits[0] == '2':
                     ec_label = None
-                    origin = self.lfunc_data.get('origin', '') if hasattr(self, 'lfunc_data') and self.lfunc_data else ''
-                    print("DEBUGDEBUG", origin)
-                    if 'EllipticCurve' in origin or 'ec' in origin.lower() or getattr(self, 'Ltype', lambda: '')() == 'elliptic':
-                        if hasattr(self, 'instances') and self.instances:
+                    origin_candidates = []
+                    if hasattr(self, 'lfunc_data') and self.lfunc_data:
+                        origin_candidates.append(str(self.lfunc_data.get('origin', '')))
+                    origin_candidates.append(str(getattr(self, 'origin', '')))
+                    if hasattr(self, 'origins') and self.origins:
+                        for name, url in self.origins:
+                            if isinstance(name, str):
+                                origin_candidates.append(name)
+                            if isinstance(url, str):
+                                origin_candidates.append(url)
+                    origin_text = ' '.join(origin_candidates).lower()
+                    is_ec_origin = any(token in origin_text for token in [
+                        'ellipticcurve',
+                        'elliptic curve',
+                        '/ellipticcurve/',
+                        '/ellipticcurve',
+                        '/ec/',
+                        '/ec',
+                    ])
+                    if is_ec_origin:
+                        if hasattr(self, 'origins') and self.origins:
+                            for name, url in self.origins:
+                                if isinstance(url, str) and 'ellipticcurve' in url.lower():
+                                    ec_label = url.split('/')[-1].rstrip('/')
+                                    break
+                        if ec_label is None and hasattr(self, 'instances') and self.instances:
                             for _, url in self.instances:
-                                if 'EllipticCurve' in url:
-                                    ec_label = url.split('/')[-1]
+                                if isinstance(url, str) and 'ellipticcurve' in url.lower():
+                                    ec_label = url.split('/')[-1].rstrip('/')
                                     break
                         if ec_label is None:
                             ec_label = self.label.split('-')[1]
+                        if ec_label and not ec_label.endswith('1'):
+                            ec_label = ec_label + '1'
                     if ec_label is not None:
                         ec_data = getEllipticCurveData(ec_label)
                         if ec_data is not None:
