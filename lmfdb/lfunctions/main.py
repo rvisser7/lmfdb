@@ -1297,7 +1297,7 @@ def set_bread_and_friends(info, L, request):
     Depends on the type of L-function and needs to be added to for new types
     """
 
-    # bread crums on top
+    # bread crumbs on top
     info['bread'] = []
     info['origins'] = []
     info['friends'] = []
@@ -1333,6 +1333,10 @@ def set_bread_and_friends(info, L, request):
         info['factors_origins'] = L.factors_origins
         info['Linstances'] = L.instances
         info['downloads'] = L.downloads
+
+        for lang in ['magma', 'gp', 'sage']:
+             info['downloads'].append(('Magma commands', url_for(".lf_code_download", label=self.lmfdb_label, download_type=lang)))
+
         info['downloads'].append(("Underlying data", url_for(".lfunc_data", label=L.label)))
 
         for elt in [info['origins'], info['friends'], info['factors_origins'], info['Linstances']]:
@@ -1610,6 +1614,22 @@ def download_dirichlet_coeff(label, L=None): # the wrapper populates the L
 def download(label, L=None): # the wrapper populates the L
     assert label
     return L.download()
+
+sorted_code_names = ['lfunction', 'dirichlet_series', 'degree', 'conductor', 'sign', 'zeros',
+                     'Lhalf', 'Lone']
+
+@l_function_page.route("/<label>/download/<download_type>")
+def lf_code_download(**args):
+    try:
+        lf = Lfunction_from_db(label)
+        lf.make_code_snippets()
+        code = CodeSnippet(lf.code)
+        response = code.export_code(label, download_type, sorted_code_names)
+
+    except Exception as err:
+        return abort(404, str(err))
+    response.headers['Content-type'] = 'text/plain'
+    return response
 
 @l_function_page.route("/data/<label>")
 def lfunc_data(label):

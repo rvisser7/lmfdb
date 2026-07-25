@@ -699,6 +699,25 @@ class Lfunction_from_db(Lfunction):
         if self.knowltype is not None:
             self.info['knowltype'] = self.knowltype
 
+    @lazy_attribute
+    def code_snippets(self):
+        # read in code.yaml from current directory:
+        _curdir = os.path.dirname(os.path.abspath(__file__))
+        code = yaml.load(open(os.path.join(_curdir, "code.yaml")), Loader=yaml.FullLoader)
+
+        data = {
+            'label': "{label}",
+            'lang' : "{lang}",
+            'ainvs': self.data['ainvs'],
+            'level': adelic_level,
+            'adelic_gens': adelic_gens }
+
+        for prop in code:
+            if prop != 'snippet_test':
+                for lang in code[prop]:
+                    code[prop][lang] = code[prop][lang].format(**data)
+        return code
+
 
 #############################################################################
 

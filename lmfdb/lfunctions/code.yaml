@@ -1,0 +1,74 @@
+prompt:
+  sage:   'sage'
+  pari:   'gp'
+
+frontmatter:
+  all: |
+    {lang} code for working with L-function {label}
+  rest: |
+    Note that the code below is using the arithmetic normalization.
+
+
+# Here we give seperate code snippets for constructing  L-functions based on the origin of the L-function
+# e.g. code for elliptic curves, genus 2 curves, modular forms, Dirichlet characters, etc...
+
+lfunction_ec:
+  comment: Define the L-function of the elliptic curve
+  sage: |
+    E = EllipticCurve(%s)
+    L = E.lseries()
+  pari: |
+    E = ellinit(%s);
+    L = lfuncreate(E);
+
+
+lfunction_g2c:
+  comment: Define the L-function of the genus 2 curve
+  sage: |
+    R = PolynomialRing(QQ, 'x')
+    fh = %s
+    C = HyperellipticCurve(R(fh[0]), R(fh[1]))
+    from sage.lfunctions.pari import lfun_genus2, LFunction
+    L = LFunction(lfun_genus2(C))
+  pari: |
+    fh = %s;
+    L = lfungenus2([Polrev(fh[1]), Polrev(fh[2])]);
+
+
+lfunction_dc:
+  comment: Define the L-function of the Dirichlet character
+  sage: |
+    test
+  pari: |
+    test
+    
+
+
+# For each L-function invariant (degree, conductor, sign, etc.), we give a "generic" code snippet,
+# and then give specific code snippets which depend on the origin of the L-function (which overrides the generic snippet)
+
+ 
+conductor:
+  comment: Conductor
+  pari: lfunparams(L)[1]
+  magma: Conductor(L);
+conductor_ec:
+  sage: E.conductor()
+conductor_g2c:
+  sage: L.conductor
+conductor_dirichlet:
+  sage: chi.conductor()
+
+
+zeros:
+  comment: Zeros on the critical line
+  pari: lfunzeros(L, 20)
+zeros_ec:
+  comment: Imaginary parts of the first 10 zeros on the critical line
+  sage: L.zeros(10)
+zeros_g2c:
+  sage: L.zeros(20)
+zeros_dirichlet:
+  sage: L.zeros(20)
+
+
