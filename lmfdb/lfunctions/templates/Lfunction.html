@@ -25,6 +25,14 @@
 </script>
 
 
+{% if code and code['lfunction_ec'] %}
+<p>{{ place_code('lfunction_ec', is_top_snippet=True) }}</p>
+{% elif code and code['lfunction_g2c'] %}
+<p>{{ place_code('lfunction_g2c', is_top_snippet=True) }}</p>
+{% elif code and code['lfunction_dc'] %}
+<p>{{ place_code('lfunction_dc', is_top_snippet=True) }}</p>
+{% endif %}
+
 <center>
 {% if dirichlet_arithmetic -%}
 <div>{{ KNOWL('lfunction.normalization', title='Normalization') }}: &nbsp;  <button class='arithmetic active' onclick="show_normalization('arithmetic'); return false">arithmetic</button>

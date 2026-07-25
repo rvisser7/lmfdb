@@ -53,6 +53,7 @@ from lmfdb.utils import (
     parse_primes, coeff_to_poly, Downloader,
     SearchArray, TextBox, SelectBox, YesNoBox, CountBox,
     SubsetBox, TextBoxWithSelect, RowSpacer, redirect_no_cache)
+from lmfdb.utils.place_code import CodeSnippet
 from lmfdb.utils.interesting import interesting_knowls
 from lmfdb.utils.names_and_urls import names_and_urls
 from lmfdb.utils.search_columns import SearchColumns, LinkCol, MathCol, CheckCol, ProcessedCol, MultiProcessedCol
@@ -1234,6 +1235,8 @@ def initLfunction(L, args, request):
     info = L.info
     info['args'] = args
     info['properties'] = set_gaga_properties(L)
+    if hasattr(L, 'make_code_snippets'):
+        info['code'] = L.make_code_snippets()
 
     set_bread_and_friends(info, L, request)
 
@@ -1335,9 +1338,9 @@ def set_bread_and_friends(info, L, request):
         info['downloads'] = L.downloads
 
         for lang in ['magma', 'gp', 'sage']:
-             info['downloads'].append(('Magma commands', url_for(".lf_code_download", label=self.lmfdb_label, download_type=lang)))
+            info['downloads'].append((f'{lang.title()} commands', url_for('.lf_code_download', label=L.label, download_type=lang)))
 
-        info['downloads'].append(("Underlying data", url_for(".lfunc_data", label=L.label)))
+        info['downloads'].append(("Underlying data", url_for('.lfunc_data', label=L.label)))
 
         for elt in [info['origins'], info['friends'], info['factors_origins'], info['Linstances']]:
             if elt is not None:
@@ -1620,11 +1623,14 @@ sorted_code_names = ['lfunction', 'dirichlet_series', 'degree', 'conductor', 'si
 
 @l_function_page.route("/<label>/download/<download_type>")
 def lf_code_download(**args):
+    label = args['label']
+    download_type = args['download_type']
     try:
-        lf = Lfunction_from_db(label)
+        lf = Lfunction_from_db(label=label)
         lf.make_code_snippets()
         code = CodeSnippet(lf.code)
-        response = code.export_code(label, download_type, sorted_code_names)
+        snippet_names = [name for name in lf.code if name not in {'prompt', 'frontmatter', 'show', 'snippet_test'}]
+        response = make_response(code.export_code(label, download_type, snippet_names))
 
     except Exception as err:
         return abort(404, str(err))

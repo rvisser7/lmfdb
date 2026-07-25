@@ -9,6 +9,20 @@ class LfunctionTest(LmfdbTest):
 
     # All tests should pass
 
+    def test_code_snippet_download(self):
+        response = self.tc.get('/L/2-11-1.1-c1-0-0/download/sage')
+        assert response.status_code == 200
+        body = response.get_data(as_text=True)
+        assert 'E = EllipticCurve' in body
+        assert 'L = E.lseries()' in body
+
+    def test_dirichlet_code_snippet_download(self):
+        response = self.tc.get('/L/1-19-19.9-r0-0-0/download/sage')
+        assert response.status_code == 200
+        body = response.get_data(as_text=True)
+        assert 'DirichletCharacter(19, 9)' in body
+        assert 'chi = DirichletCharacter(19, 9)' in body
+
     #------------------------------------------------------
     # Testing at least one example of each type of L-function page
     #------------------------------------------------------

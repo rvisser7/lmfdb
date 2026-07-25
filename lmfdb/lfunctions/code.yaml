@@ -1,6 +1,8 @@
 prompt:
   sage:   'sage'
   pari:   'gp'
+  magma:  'magma'
+  oscar:  'oscar'
 
 frontmatter:
   all: |
@@ -15,31 +17,50 @@ frontmatter:
 lfunction_ec:
   comment: Define the L-function of the elliptic curve
   sage: |
-    E = EllipticCurve(%s)
+    E = EllipticCurve({ainvs})
     L = E.lseries()
   pari: |
-    E = ellinit(%s);
+    E = ellinit({ainvs});
     L = lfuncreate(E);
-
+  magma: |
+    E := EllipticCurve({ainvs});
+    L := LSeries(E);
+  oscar: |
+    E = elliptic_curve({ainvs})
+    L = lseries(E)
 
 lfunction_g2c:
   comment: Define the L-function of the genus 2 curve
   sage: |
     R = PolynomialRing(QQ, 'x')
-    fh = %s
+    fh = {fh}
     C = HyperellipticCurve(R(fh[0]), R(fh[1]))
     from sage.lfunctions.pari import lfun_genus2, LFunction
     L = LFunction(lfun_genus2(C))
   pari: |
-    fh = %s;
-    L = lfungenus2([Polrev(fh[1]), Polrev(fh[2])]);
-
+    fh = {fh};
+    L = lfungenus2([Polrev(fh[1]), Polrev(fh[2])] );
+  magma: |
+    fh := {fh};
+    L := LSeries(Genus2Curve(fh));
+  oscar: |
+    R, x = polynomial_ring(QQ, "x")
+    fh = {fh}
+    C = hyperelliptic_curve(R(fh[0]), R(fh[1]))
+    L = lseries(C)
 
 lfunction_dc:
   comment: Define the L-function of the Dirichlet character
   sage: |
-    test
+    chi = DirichletCharacter({modulus}, {number})
+    L = chi.lseries()
   pari: |
+    chi = charinit({modulus}, {number});
+    L = lfuncreate(chi);
+  magma: |
+    chi := DirichletCharacter({modulus}, {number});
+    L := LSeries(chi);
+  oscar: |
     test
     
 
@@ -52,23 +73,45 @@ conductor:
   comment: Conductor
   pari: lfunparams(L)[1]
   magma: Conductor(L);
+  sage: conductor(L)
+  oscar: conductor(L)
 conductor_ec:
   sage: E.conductor()
+  pari: ellglobalred(E)[1]
+  magma: Conductor(E);
+  oscar: conductor(E)
 conductor_g2c:
   sage: L.conductor
+  pari: lfunparams(L)[1]
+  magma: Conductor(L);
+  oscar: conductor(L)
 conductor_dirichlet:
   sage: chi.conductor()
-
+  pari: charconductor(chi)
+  magma: Conductor(chi);
+  oscar: conductor(chi)
 
 zeros:
   comment: Zeros on the critical line
   pari: lfunzeros(L, 20)
+  sage: L.zeros(20)
+  magma: Zeros(L, 20);
+  oscar: zeros(L, 20)
 zeros_ec:
   comment: Imaginary parts of the first 10 zeros on the critical line
   sage: L.zeros(10)
+  pari: lfunzeros(L, 10)
+  magma: Zeros(L, 10);
+  oscar: zeros(L, 10)
 zeros_g2c:
   sage: L.zeros(20)
+  pari: lfunzeros(L, 20)
+  magma: Zeros(L, 20);
+  oscar: zeros(L, 20)
 zeros_dirichlet:
   sage: L.zeros(20)
+  pari: lfunzeros(L, 20)
+  magma: Zeros(L, 20);
+  oscar: zeros(L, 20)
 
 

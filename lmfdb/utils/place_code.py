@@ -123,8 +123,17 @@ class CodeSnippet():
             lang = 'pari'
         code = self.build_frontmatter(label,lang)
         for key in sorted_code_names:
-            assert key in self.code
-            if self.code[key] is not None and lang in self.code[key]:
-                code += "\n{} {}: \n".format(self.comments[lang], self.code[key]['comment'])
-                code += self.code[key][lang] + ('\n' if '\n' not in self.code[key][lang] else '')
+            if key not in self.code:
+                continue
+            entry = self.code[key]
+            if not isinstance(entry, dict):
+                continue
+            if entry is not None and lang in entry:
+                comment = entry.get('comment', '')
+                if comment:
+                    code += "\n{} {}: \n".format(self.comments[lang], comment)
+                else:
+                    code += "\n"
+                snippet = entry[lang]
+                code += snippet + ('\n' if '\n' not in snippet else '')
         return code
