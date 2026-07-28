@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4 # Or a specific version
+        uses: actions/checkout@v7 # Or a specific version
 
       - name: Set up environment
         uses: ./.github/actions/snippet_setup
@@ -58,7 +58,7 @@ jobs:
 
       - name: Upload diff as artifact
         if: ${{ failure() && steps.diff_check.conclusion == 'failure' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: repo-diff
           path: changes.diff
