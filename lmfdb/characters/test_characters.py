@@ -183,6 +183,15 @@ class DirichletCharactersTest(LmfdbTest):
         assert 'Kronecker symbol' in W.get_data(as_text=True)
         assert r'\left(\frac{-4}{\bullet}\right)' in W.get_data(as_text=True)
 
+    def test_portrait(self):
+        # The Gauss-sum portrait (issue #3996) is embedded in the properties
+        # box for small modulus, computed on the fly.
+        W = self.tc.get('/Character/Dirichlet/27/8')
+        assert 'data:image/png;base64,' in W.get_data(as_text=True), "portrait present"
+        # It is skipped for large modulus, where computing it on the fly is too slow.
+        W = self.tc.get('/Character/Dirichlet/40487/5')
+        assert 'data:image/png;base64,' not in W.get_data(as_text=True), "portrait skipped"
+
     def test_dirichlet_calc(self):
         W = self.tc.get('/Character/calc-gauss/Dirichlet/4/3?val=3')
         assert '-2.0i' in W.get_data(as_text=True), "calc gauss"

@@ -547,6 +547,10 @@ def render_Dirichletwebpage(modulus=None, orbit_label=None, number=None):
     info['learnmore'] = learn()
     info['downloads'] = downloads
     info['KNOWL_ID'] = 'character.dirichlet.%s.%s' % (modulus, number)
+    # Gauss-sum portrait in the properties box (#3996); local import keeps this
+    # hook self-contained (see lmfdb/characters/portraits.py).
+    from lmfdb.characters.portraits import add_portrait
+    add_portrait(info, modulus, number)
     return render_template('Character.html', **info)
 
 @characters_page.route('/Dirichlet/<label>/download/<download_type>')
