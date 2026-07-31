@@ -12,7 +12,7 @@ from lmfdb.utils import (
     display_complex, list_to_factored_poly_otherorder, make_bigint,
     list_factored_to_factored_poly_otherorder, coeff_to_poly)
 from lmfdb.galois_groups.transitive_group import transitive_group_display_knowl_C1_as_trivial
-from lmfdb.lfunctions import logger
+from lmfdb.logger import logger
 from sage.databases.cremona import cremona_letter_code
 from lmfdb.abvar.fq.main import url_for_label
 from lmfdb.abvar.fq.stats import AbvarFqStats
@@ -222,6 +222,7 @@ def Lfactor_to_label_and_link_if_exists(poly):
         return label
     return '<a href="%s">%s</a>' % (url_for_label(label), label)
 
+
 def display_isogeny_label(L):
     g = L.degree // 2
     bad_primes = [factor[0] for factor in L.bad_lfactors]
@@ -230,11 +231,12 @@ def display_isogeny_label(L):
     if g <= 3:
         return True
     elif g == 4:
-        return any(not(p in bad_primes) for p in [2,3,5])
+        return any(p not in bad_primes for p in [2, 3, 5])
     elif g == 5:
-        return any(not(p in bad_primes) for p in [2,3])
-    else: # g == 6
+        return any(p not in bad_primes for p in [2, 3])
+    else:  # g == 6
         return not (2 in bad_primes)
+
 
 def lfuncDShtml(L, fmt):
     """ Returns the HTML for displaying the Dirichlet series of the L-function L.

@@ -48,12 +48,14 @@ from lmfdb.utils import (
     pos_int_and_factor,
     sparse_cyclotomic_to_mathml,
     integer_to_mathml,
+    redirect_no_cache,
+    CodeSnippet,
 )
-from lmfdb.utils.search_parsing import (parse_multiset, search_parser)
+from lmfdb.utils.search_parsing import (parse_multiset, search_parser, collapse_ors)
 from lmfdb.utils.interesting import interesting_knowls
 from lmfdb.utils.search_columns import SearchColumns, LinkCol, MathCol, CheckCol, SpacerCol, ProcessedCol, MultiProcessedCol, ColGroup
 from lmfdb.api import datapage
-from . import abstract_page  # , abstract_logger
+from . import abstract_page
 from .web_groups import (
     WebAbstractCharacter,
     WebAbstractConjClass,
@@ -76,6 +78,10 @@ abstract_group_label_regex = re.compile(r"^(\d+)\.([a-z]+|\d+)$")
 abstract_subgroup_label_regex = re.compile(
     r"^(\d+)\.([a-z]+|\d+)\.(\d+)\.([a-z]+\d+|[a-z]+\d+\.[a-z]+\d+|[A-Z]+|_\.[A-Z]+)$"
 )
+
+abstract_cc_label_regex = re.compile(r"^(\d+)\.([a-z]+|\d+)\.\d+[A-Z]+(?:-\d+|\d+)?$")
+abstract_char_label_regex = re.compile(r"^(\d+)\.([a-z]+|\d+)\.\d+[a-z]+\d*$")
+
 
 #abstract_subgroup_label_regex = re.compile(
 #    r"^(\d+)\.([a-z0-9]+)\.(\d+)\.([a-z]+\d+)(?:\.([a-z]+\d+))?(?:\.(N|M|NC\d+))?$"
@@ -104,6 +110,7 @@ def yesno(val):
 
 def deTeX_name(s):
     s = re.sub(r"[{}\\$]", "", s)
+    s = s.replace("Orth", "O").replace("Unitary", "U")
     return s
 
 
@@ -153,8 +160,6 @@ def group_families(deTeX=False):
     for f in ['A','B','D','E','F']:
         L.insert(cox_index, ("Cox"+f[0], "$W("+f+"_{{n}})$"))
         cox_index += 1
-    L.insert(cox_index, ("CoxH", "$H_{{n}}$"))
-    L.insert(cox_index+1, ("CoxI2", "$I_2({n})$"))
 
     if deTeX:
         # Used for constructing the dropdown
@@ -239,19 +244,13 @@ def parse_family(inp, query, qfield):
         query[qfield] = {'$in':list(db.gps_special_names.search({'family':"TwistChev", 'parameters.twist':int(inp[9]), 'parameters.fam':inp[10]}, projection='label'))}
     # Searching for Coxeter families should include all dihedral groups and all symmetric S_n for n >= 2
     elif inp == 'Cox':
-        labels = list(db.gps_special_names.search({'$or':[{'family':'Cox'},{'family':'D'},{'family':'S'}]}, projection='label'))
-        labels.remove('1.1')
-        query[qfield] = {'$in':labels}
-    # Case of CoxA  (return all symmetric groups S_n for n >= 2)
-    elif inp == 'CoxA':
-        labels = list(db.gps_special_names.search({'family':'S'}, projection='label'))
-        labels.remove('1.1')
-        query[qfield] = {'$in':labels}
+        labels = list(db.gps_special_names.search({'family': {'$or': ['Cox', 'CoxH']}}, projection='label'))
+        collapse_ors(["$or", [{"dihedral":True}, {"label": {"$in": labels}}]], query)
     # Case of CoxI2 (return all dihedral groups D_n)
-    elif inp == 'CoxI2':
+    elif inp == 'CoxI':
         query["dihedral"] = True
     # Case to check if family is one of the individual irreducible Coxeter families
-    elif inp[:3] == 'Cox' and len(inp) == 4:
+    elif inp[:3] == 'Cox' and inp[3] != "H":
         query[qfield] = {'$in':list(db.gps_special_names.search({'family':"Cox", 'parameters.fam':inp[3]}, projection='label'))}
 
     else:
@@ -770,9 +769,7 @@ def create_boolean_aut_string(gp, prefix="aut_", type="normal", name="automorphi
         unknown.remove('nonsolvable')
     prop = 'pgroup'  # if p-group, we know it is nilpotent, solvable, and supersolvable
     if getattr(gp,prefix+prop,None) > 1:
-        unknown.remove('nilpotent')
-        unknown.remove('solvable')
-        unknown.remove('supersolvable')
+        unknown = [z for z in unknown if z not in ['nilpotent','solvable','supersolvable']]
 
     unknown = [overall_display[prop] for prop in unknown]
     if unknown and type != "knowl":
@@ -809,20 +806,27 @@ def index():
     bread = get_bread()
     info = to_dict(request.args, search_array=GroupsSearchArray())
     if request.args:
-        info["search_type"] = search_type = info.get(
-            "search_type", info.get("hst", "")
-        )
-        if search_type in ["List", "", "Random"]:
+        search_types = request.args.getlist("search_type")
+        info["search_type"] = search_type = search_types[-1] if search_types else info.get("hst", "")
+        if search_type in ["List", "", "Random", "Diagram"]:
             return group_search(info)
-        elif search_type in ["Subgroups", "RandomSubgroup"]:
-            info["search_array"] = SubgroupSearchArray()
-            return subgroup_search(info)
-        elif search_type in ["ComplexCharacters", "RandomComplexCharacter"]:
-            info["search_array"] = ComplexCharSearchArray()
-            return complex_char_search(info)
-        elif search_type in ["ConjugacyClasses"]:  # no random since lots of groups with cc don't have characters also computed
-            info["search_array"] = ConjugacyClassSearchArray()
-            return conjugacy_class_search(info)
+        # Preserve old abstract-group search URLs while directing users to the
+        # new, object-specific landing pages.  Keep Random* as a search type so
+        # that SearchWrapper still performs a random lookup on the new route.
+        legacy_searches = {
+            "Subgroups": (".sub_index", None),
+            "RandomSubgroup": (".sub_index", "RandomSubgroup"),
+            "ComplexCharacters": (".char_index", None),
+            "RandomComplexCharacter": (".char_index", "RandomComplexCharacter"),
+            "ConjugacyClasses": (".conjugacy_class_index", None),
+        }
+        if search_type in legacy_searches:
+            endpoint, new_search_type = legacy_searches[search_type]
+            args = request.args.to_dict(flat=False)
+            args.pop("search_type", None)
+            if new_search_type is not None:
+                args["search_type"] = [new_search_type]
+            return redirect(url_for(endpoint, **args), 307)
     info["stats"] = GroupStats()
     info["count"] = 50
     info["order_list"] = ["1-64", "65-127", "128", "129-255", "256", "257-383", "384", "385-511", "513-1000", "1001-1500", "1501-2000", "2001-"]
@@ -845,6 +849,93 @@ def index():
         bread=bread,
         info=info,
         learnmore=learnmore_list(),
+        related_sections=[
+            ("Subgroups", url_for(".sub_index")),
+            ("Characters", url_for(".char_index")),
+            ("Conjugacy classes", url_for(".conjugacy_class_index")),
+        ],
+    )
+
+
+@abstract_page.route("/Subgroups")
+def sub_index():
+    info = to_dict(request.args, search_array=SubgroupSearchArray())
+    if request.args:
+        return subgroup_search(info)
+    info["ambient_order_list"] = ["1-64", "65-127", "128", "129-255", "256", "257-383", "384", "385-511", "513-1000", "1001-1500", "1501-2000", "2001-"]
+    info["subgroup_order_list"] = ["1-16", "17-32", "33-64", "65-128", "129-256", "257-512", "513-1000", "1001-"]
+    info["prop_browse_list"] = [
+        ("normal=yes", "normal"),
+        ("normal=no", "non-normal"),
+        ("abelian=yes", "abelian"),
+        ("cyclic=yes", "cyclic"),
+        ("maximal=yes", "maximal"),
+        ("central=yes", "central"),
+        ("perfect=yes", "perfect"),
+        ("characteristic=yes", "characteristic"),
+    ]
+    info["stats"] = GroupStats()
+    info["search_array"] = SubgroupSearchArray()
+    info["count"] = 50
+    return render_template(
+        "abstract-subgroup.html",
+        title="Subgroups of abstract groups",
+        bread=get_bread([("Subgroups", " ")]),
+        info=info,
+        learnmore=learnmore_list(),
+        related_sections=[
+            ("Groups", url_for(".index")),
+            ("Characters", url_for(".char_index")),
+            ("Conjugacy classes", url_for(".conjugacy_class_index")),
+        ],
+    )
+
+
+@abstract_page.route("/ComplexCharacters")
+def char_index():
+    info = to_dict(request.args, search_array=ComplexCharSearchArray())
+    if request.args:
+        return complex_char_search(info)
+    info["search_array"] = ComplexCharSearchArray()
+    info["degree_list"] = ["1", "2", "3", "4", "5", "6", "7", "8", "9-16", "17-"]
+    info["stats"] = GroupStats()
+    info["count"] = 50
+    return render_template(
+        "abstract-characters.html",
+        title="Complex characters of abstract groups",
+        bread=get_bread([("Characters", " ")]),
+        info=info,
+        learnmore=learnmore_list(),
+        related_sections=[
+            ("Groups", url_for(".index")),
+            ("Subgroups", url_for(".sub_index")),
+            ("Conjugacy classes", url_for(".conjugacy_class_index")),
+        ],
+    )
+
+
+@abstract_page.route("/ConjugacyClasses")
+def conjugacy_class_index():
+    info = to_dict(request.args, search_array=ConjugacyClassSearchArray())
+    if request.args:
+        return conjugacy_class_search(info)
+    # no random since lots of groups with cc don't have characters also computed
+    info["search_array"] = ConjugacyClassSearchArray()
+    info["order_list"] = ["1", "2", "3", "4", "5", "6", "7", "8", "9-16", "17-32", "33-"]
+    info["size_list"] = ["1", "2", "3", "4", "5", "6-10", "11-20", "21-50", "51-"]
+    info["stats"] = GroupStats()
+    info["count"] = 50
+    return render_template(
+        "abstract-cc.html",
+        title="Conjugacy classes of abstract groups",
+        bread=get_bread([("Conjugacy classes", " ")]),
+        info=info,
+        learnmore=learnmore_list(),
+        related_sections=[
+            ("Groups", url_for(".index")),
+            ("Subgroups", url_for(".sub_index")),
+            ("Characters", url_for(".char_index")),
+        ],
     )
 
 
@@ -875,11 +966,10 @@ def dynamic_statistics():
 
 
 @abstract_page.route("/random")
+@redirect_no_cache
 def random_abstract_group():
     label = db.gps_groups.random(projection="label")
-    response = make_response(redirect(url_for(".by_label", label=label), 307))
-    response.headers["Cache-Control"] = "no-cache, no-store"
-    return response
+    return url_for(".by_label", label=label)
 
 
 @abstract_page.route("/interesting")
@@ -1017,8 +1107,22 @@ def by_subgroup_label(label):
         return redirect(url_for(".index"))
 
 
+@abstract_page.route("/sub/random")
+@redirect_no_cache
+def random_abstract_subgroup():
+    label = db.gps_subgroup_search.random(projection="label")
+    return url_for(".by_subgroup_label", label=label)
+
+
+@abstract_page.route("/char/random")
+@redirect_no_cache
+def random_abstract_character():
+    label = db.gps_char.random(projection="label")
+    return url_for_chartable_label(label)
+
+
 @abstract_page.route("/char_table/<label>")
-def char_table(label):
+def char_table(label, from_jump=False):
     label = clean_input(label)
     info = to_dict(request.args,
                    dispv=sparse_cyclotomic_to_mathml)
@@ -1038,6 +1142,8 @@ def char_table(label):
     if "cc_highlight" in info and info["cc_highlight"] not in [c.label for c in gp.conjugacy_classes]:
         flash_error(f"There is no conjugacy class of {label} with label {info['cc_highlight']}.")
         del info["cc_highlight"]
+    if "cc_highlight" in info and "cc_highlight_i" not in info:
+        info["cc_highlight_i"] = [c.counter for c in gp.conjugacy_classes if c.label == info["cc_highlight"]][0]
     return render_template(
         "character_table_page.html",
         gp=gp,
@@ -1166,18 +1272,118 @@ def group_jump(info):
     elif len(labs) == 2:
         return redirect(url_for(".index", name=jump.replace(" ", "")))
     # by special name
+
+    def int_try(x):
+        if x.isdigit():
+            return int(x)
+        return x
+
+    def valid_params(fam, params):
+        n = ZZ(params.get("n"))
+        q = ZZ(params.get("q"))
+        if fam in ["Q", "SD", "OD"]:
+            return n.is_power_of(2)
+        if fam == "F":
+            return n.is_prime_power()
+        elif fam == "He":
+            return n > 2 and n.is_prime()
+        elif fam in ["Sp", "PSp", "SOPlus", "SOMinus", "GOPlus", "GOMinus", "OmegaPlus", "OmegaMinus", "PSOPlus", "PSOMinus", "PGOPlus", "PGOMinus", "POmegaPlus", "POmegaMinus", "SpinPlus", "SpinMinus", "CSp", "CSOPlus", "CSOMinus", "COPlus", "COMinus", "PSigmaSp", "ASigmaSp"]:
+            return n % 2 == 0
+        elif fam in ["SO", "PSO", "GO", "Omega", "PGO", "POmega", "Spin", "CSO", "CO"]:
+            return n % 2 == 1
+        elif fam == "CoxH":
+            return n in [3,4]
+        elif fam in ["Cox", "Chev"]:
+            if params["fam"] == "E":
+                return n in [6,7,8]
+            elif params["fam"] == "F":
+                return n == 4
+            elif params["fam"] == "G":
+                return n == 2
+        elif fam == "TwistChev":
+            if params["fam"] == "A":
+                return params["twist"] == 2
+            elif params["fam"] == "B":
+                return n == 2 and params["twist"] == 2 and q.is_power_of(2) and not q.is_power_of(4)
+            elif params["fam"] == "D":
+                return params["twist"] == 2 or (params["twist"] == 3 and n == 4)
+            elif params["fam"] == "E":
+                return n == 6 and params["twist"] == 2
+            elif params["fam"] == "F":
+                return n == 4 and params["twist"] == 2 and q.is_power_of(2) and not q.is_power_of(4)
+            elif params["fam"] == "G":
+                return n == 2 and params["twist"] == 2 and q.is_power_of(3) and not q.is_power_of(9)
     for family in db.gps_families.search():
         m = re.fullmatch(family["input"], jump)
         if m:
-            m_dict = dict([a, int(x)] for a, x in m.groupdict().items()) # convert string to int
+            m_dict = dict([a, int_try(x)] for a, x in m.groupdict().items()) # convert string to int
             lab = db.gps_special_names.lucky({"family":family["family"], "parameters":m_dict}, projection="label")
             if lab:
                 return redirect(url_for(".by_label", label=lab))
-            else:
+            elif valid_params(family["family"], m_dict):
+                # Only display this messages for groups that exist
                 flash_error("The group %s has not yet been added to the database." % jump)
                 return redirect(url_for(".index"))
     flash_error("%s is not a valid name for a group or subgroup; see %s for a list of possible families" % (jump, display_knowl('group.families', 'here')))
     return redirect(url_for(".index"))
+
+
+def subgroup_jump(info):
+    jump = info["jump"]
+    # by label
+    if abstract_group_label_regex.fullmatch(jump):
+        return redirect(url_for('.sub_index', subgroup=jump))
+    # by subgroup label
+    if subgroup_label_is_valid(jump):
+        return redirect(url_for(".by_subgroup_label", label=jump))
+    flash_error(f"There is no group nor subgroup with the label {jump} in the database")
+    return redirect(url_for(".sub_index"))
+
+
+def char_jump(info):
+    jump = info["jump"]
+        # by char label
+    if abstract_char_label_regex.fullmatch(jump):
+        spl_parts = jump.split(".")
+        gp = ".".join(spl_parts[:2])
+        return redirect(url_for(".char_table",label=gp,char_highlight=jump ))
+    # by label
+    if abstract_group_label_regex.fullmatch(jump):
+        return redirect(url_for(".char_table", label=jump))
+    #transitive group
+    from lmfdb.galois_groups.transitive_group import Tfinder
+    if Tfinder.fullmatch(jump):
+        label = db.gps_transitive.lookup(jump, "abstract_label")
+        if label is None:
+            flash_error(f"Transitive group {jump} is not in the database")
+            return redirect(url_for(".char_index"))
+        return redirect(url_for(".char_table", label=label))
+    flash_error(f"There is no group nor character with the label {jump} in the database")
+    return redirect(url_for(".char_index"))
+
+
+def cc_jump(info):
+    jump = info["jump"]
+        #by cc label
+    if abstract_cc_label_regex.fullmatch(jump):
+        spl_parts = jump.split(".")
+        gp = ".".join(spl_parts[:2])
+        cc = spl_parts[2:]
+        return redirect(url_for(".char_table",label=gp,cc_highlight=cc ))
+    # by label
+    if abstract_group_label_regex.fullmatch(jump):
+        return redirect(url_for('.conjugacy_class_index', group=jump))
+    #transitive group
+    from lmfdb.galois_groups.transitive_group import Tfinder
+    if Tfinder.fullmatch(jump):
+        label = db.gps_transitive.lookup(jump, "abstract_label")
+        if label is None:
+            flash_error(f"Transitive group {jump} is not in the database")
+            return redirect(url_for('.conjugacy_class_index'))
+        return redirect(url_for(".conjugacy_class_index", group=label))
+    flash_error(f"There is no group nor character with the label {jump} in the database")
+    return redirect(url_for(".conjugacy_class_index"))
+
 
 def show_factor(n):
     if n is None or n == "":
@@ -1268,7 +1474,8 @@ def display_cc_url(numb,conj_classes_known,gp):
         return 'not computed'
     elif conj_classes_known is False:
         return numb
-    return f'<a href = "{url_for(".index", group=gp, search_type="ConjugacyClasses")}">{numb}</a>'
+    return f'<a href = "{url_for(".conjugacy_class_index", group=gp)}">{numb}</a>'
+
 
 class Group_download(Downloader):
     table = db.gps_groups
@@ -1287,21 +1494,23 @@ def group_postprocess(res, info, query):
     for rec in res:
         rec["tex_cache"] = tex_cache
     if "family" in info:
-        if info["family"] == "any":
+        family = info["family"]
+        if family == "any":
             fquery = {}
 
         # Special case to convert the family "ChevX" (for X = A..G) to just "Chev" for the database query
-        elif info["family"][:4] == "Chev":
+        elif family[:4] == "Chev":
             fquery = {"family": "Chev"}
         # Also special case to convert the family "TwistChevNX" to just "TwistChev" for the database query
-        elif info["family"][:9] == "TwistChev":
+        elif family[:9] == "TwistChev":
             fquery = {"family": "TwistChev"}
         # Convert "CoxX" to: ("Cox" or "S" or "D") for database query
-        elif info["family"][:3] == "Cox":
-            fquery = {'$or':[{'family':'Cox'},{'family':'D'},{'family':'S'}]}
-
+        elif family == "Cox":
+            fquery = {"family": {"$or": ["Cox", "CoxH", "CoxI"]}}
+        elif family[:3] == "Cox" and family[3] not in "HI":
+            fquery = {"family": "Cox"}
         else:
-            fquery = {"family": info["family"]}
+            fquery = {"family": family}
         fams = {rec["family"]: (rec["priority"], rec["tex_name"]) for rec in db.gps_families.search(fquery, ["family", "priority", "tex_name"])}
         fquery["label"] = {"$in":[rec["label"] for rec in res]}
         special_names = defaultdict(list)
@@ -1315,24 +1524,14 @@ def group_postprocess(res, info, query):
 
             # Special case to deal with individual Chevalley families
             # (e.g. querying the "A(n,q)" family should ensure the "B(n,q)" family names don't show up under "Family name" search column)
-            if (info["family"][:4] == "Chev") and (len(info["family"]) == 5):
-                if name[0] != info["family"][4]:
+            if (family[:4] == "Chev") and (len(family) == 5):
+                if name[0] != family[4]:
                     continue
-            if (info["family"][:9] == "TwistChev") and (len(info["family"]) == 11):
-                if name[3:5] != info["family"][9:11]:
+            elif (family[:9] == "TwistChev") and (len(family) == 11):
+                if name[3:5] != family[9:11]:
                     continue
-            # Some special cases to deal with individual Coxeter families
-            if (info["family"][:3] == "Cox"):
-                # Convert "S_n" family name to "W(A_{n-1})" family name
-                if name[:2] == "S_":
-                    name = "W(A_{"+str(int(name[3:-1])-1)+"})"
-                # Convert "D_n" family name to "I_2(n)" family name
-                if name[:2] == "D_":
-                    name = "I_2("+name[3:-1]+")"
-                # As the H_n and I_2(n) Coxeter families are not Weyl groups, we should not display these with the W(..) notation
-                if (('H' in name) or ('I' in name)) and (name[:2] == "W(") and (name[-1] == ")"):
-                    name = name[2:-1]
-                if len(info["family"]) > 3 and info["family"][3] not in name:
+            elif (fam == "Cox" and family[:3] == "Cox" and len(family) == 4):
+                if params["fam"] != family[3]:
                     continue
 
             special_names[rec["label"]].append((fams[fam][0], params.get("n"), params.get("q"), name))
@@ -1402,6 +1601,10 @@ group_columns = SearchColumns([
     #  credit=lambda:credit_string,
     url_for_label=url_for_label,
     postprocess=group_postprocess,
+    diagram_opts={
+        "title": "Abstract group diagrams",
+        "bread": lambda: get_bread([("Diagram search", "")]),
+    },
 )
 def group_search(info, query={}):
     group_parse(info, query)
@@ -1530,13 +1733,12 @@ class Subgroup_download(Downloader):
     title="Subgroup search results",
     err_title="Subgroup search input error",
     columns=subgroup_columns,
-    shortcuts={"download": Subgroup_download()},
+    shortcuts={"jump": subgroup_jump,"download": Subgroup_download()},
     bread=lambda: get_bread([("Search Results", "")]),
     learnmore=learnmore_list,
     url_for_label=url_for_subgroup_label,
 )
 def subgroup_search(info, query={}):
-    info["search_type"] = "Subgroups"
     parse_ints(info, query, "subgroup_order")
     parse_ints(info, query, "ambient_order")
     parse_ints(info, query, "quotient_order", "subgroup index")
@@ -1635,14 +1837,13 @@ class Complex_char_download(Downloader):
     title="Complex character search results",
     err_title="Complex character search input error",
     columns=complex_char_columns,
-    shortcuts={"download": Complex_char_download()},
+    shortcuts={"jump": char_jump, "download": Complex_char_download()},
     bread=lambda: get_bread([("Search Results", "")]),
     postprocess=char_postprocess,
     learnmore=learnmore_list,
     url_for_label=url_for_chartable_label,
 )
 def complex_char_search(info, query={}):
-    info["search_type"] = "ComplexCharacters"
     if 'indicator' in info:
         info['indicator'] = indicator_type(info['indicator'])
     parse_ints(info, query, "dim")
@@ -1730,7 +1931,7 @@ def cc_postprocess(res, info, query):
         info["columns"].above_table = f"<p>{gp.repr_strg(other_page=True)}</p>"
     info["group_factors"] = common_support if common_support else []
     complex_char_known = {rec["label"]: rec["complex_characters_known"] for rec in db.gps_groups.search({'label':{"$in":list(gps)}}, ["label", "complex_characters_known"])}
-    centralizer_data = {(".".join(rec["label"].split(".")[:2]), ".".join(rec["label"].split(".")[2:])): rec["subgroup_tex"] for rec in db.gps_subgroups.search({'label':{"$in":list(centralizers)}},["label","subgroup_tex"])}
+    centralizer_data = {(".".join(rec["label"].split(".")[:2]), ".".join(rec["label"].split(".")[2:])): rec["subgroup_tex"] for rec in db.gps_subgroup_search.search({'label':{"$in":list(centralizers)}},["label","subgroup_tex"])}
     highlight_col = {}
     for rec in res:
         label = rec.get("label")
@@ -1787,7 +1988,7 @@ class Conjugacy_class_download(Downloader):
     title="Conjugacy class search results",
     err_title="Conjugacy class search input error",
     columns=conjugacy_class_columns,
-    shortcuts={"download": Conjugacy_class_download()},
+    shortcuts={"jump": cc_jump, "download": Conjugacy_class_download()},
     bread=lambda: get_bread([("Search Results", "")]),
     postprocess=cc_postprocess,
     learnmore=learnmore_list,
@@ -1795,7 +1996,6 @@ class Conjugacy_class_download(Downloader):
     url_for_label=url_for_cc_label,
 )
 def conjugacy_class_search(info, query={}):
-    info["search_type"] = "ConjugacyClasses"
     parse_ints(info, query, "order")
     parse_ints(info, query, "size")
     parse_group(info,query, "group")
@@ -1881,6 +2081,11 @@ def render_abstract_group(label, data=None):
     info['pos_int_and_factor'] = pos_int_and_factor
     info['conv'] = integer_to_mathml
     info['dispv'] = sparse_cyclotomic_to_mathml
+
+    code = gp.code_snippets()
+    if code and len(code['prompt']) == 0:  # no codes
+        code = None
+
     if gp.live():
         title = f"Abstract group {label}"
         friends = []
@@ -1898,20 +2103,22 @@ def render_abstract_group(label, data=None):
 
         # disable until we can fix downloads
         downloads = [("Group to Gap", url_for(".download_group", label=label, download_type="gap")),
-                                         ("Group to Magma", url_for(".download_group", label=label, download_type="magma")),
-                #            ("Group to Oscar", url_for(".download_group", label=label, download_type="oscar")),
-                                         ("Underlying data", url_for(".gp_data", label=label)),
-        ]
+                     ("Group to Magma", url_for(".download_group", label=label, download_type="magma"))]
+                     #("Group to Oscar", url_for(".download_group", label=label, download_type="oscar")),
+        for lang in [("Gap","gap"), ("Magma","magma"), ("SageMath","sage"), ("SageMath (using Gap)","sage_gap"), ("Oscar","oscar")]:
+            if lang[1] in code['prompt']:
+                downloads.append(('{} commands'.format(lang[0]), url_for(".download_group_code", label=label, download_type=lang[1])))
+        downloads.append(("Underlying data", url_for(".gp_data", label=label)))
 
         # "internal" friends
         sbgp_of_url = (
-            " /Groups/Abstract/?subgroup=" + label + "&search_type=Subgroups"
+            " /Groups/Abstract/Subgroups?subgroup=" + label
         )
         sbgp_url = (
-            "/Groups/Abstract/?ambient=" + label + "&search_type=Subgroups"
+            "/Groups/Abstract/Subgroups?ambient=" + label
         )
         quot_url = (
-            "/Groups/Abstract/?quotient=" + label + "&search_type=Subgroups"
+            "/Groups/Abstract/Subgroups?quotient=" + label
         )
         friends = [
             ("Subgroups", sbgp_url),
@@ -1920,7 +2127,7 @@ def render_abstract_group(label, data=None):
         ]
 
         if gp.complex_characters_known:
-            char_url = url_for(".index", group=label, search_type="ComplexCharacters")
+            char_url = url_for(".char_index", group=label)
             friends += [("Complex characters", char_url)]
 
         # "external" friends
@@ -1976,7 +2183,7 @@ def render_abstract_group(label, data=None):
         bread=bread,
         info=info,
         gp=gp,
-        code=gp.code_snippets(),
+        code=code,
         properties=gp.properties(),
         friends=friends,
         learnmore=learnmore_list_add(*learnmore_gp_picture),
@@ -1991,7 +2198,7 @@ def render_abstract_subgroup(label):
     seq = WebAbstractSubgroup(label)
     if seq.is_null():
         flash_error("No subgroup with label %s was found in the database.", label)
-        return redirect(url_for(".index"))
+        return redirect(url_for(".sub_index"))
 
     info["create_boolean_string"] = create_boolean_string
     info["create_boolean_subgroup_string"] = create_boolean_subgroup_string
@@ -2198,7 +2405,7 @@ def gp_data(label):
         group_counter = int(group_counter)
     else:
         group_counter = class_to_int(group_counter) + 1  # we start labeling at 1
-    return datapage([label, [group_order, group_counter], label, label, label], ["gps_groups", "gps_conj_classes", "gps_qchar", "gps_char", "gps_subgroups"], bread=bread, title=title, label_cols=["label", ["group_order","group_counter"], "group", "group", "ambient"])
+    return datapage([label, [group_order, group_counter], label, label, label, label], ["gps_groups", "gps_conj_classes", "gps_qchar", "gps_char", "gps_subgroup_search", "gps_subgroup_data"], bread=bread, title=title, label_cols=["label", ["group_order","group_counter"], "group", "group", "ambient", "ambient"])
 
 @abstract_page.route("/sdata/<label>")
 def sgp_data(label):
@@ -2210,9 +2417,9 @@ def sgp_data(label):
     if data is None:
         return abort(404)
     if data["quotient"] is None:
-        return datapage([label, data["subgroup"], data["ambient"]], ["gps_subgroups", "gps_groups", "gps_groups"], bread=bread, title=title)
+        return datapage([label, label, data["subgroup"], data["ambient"]], ["gps_subgroup_search", "gps_subgroup_data", "gps_groups", "gps_groups"], bread=bread, title=title)
     else:
-        return datapage([label, data["subgroup"], data["ambient"], data["quotient"]], ["gps_subgroups", "gps_groups", "gps_groups", "gps_groups"], bread=bread, title=title)
+        return datapage([label, label, data["subgroup"], data["ambient"], data["quotient"]], ["gps_subgroup_search", "gps_subgroup_data", "gps_groups", "gps_groups", "gps_groups"], bread=bread, title=title)
 
 
 # need to write characters in GAP or Magma formats for downloads
@@ -2559,6 +2766,46 @@ def download_group(**args):
     #strIO.seek(0)
     #return send_file(strIO, attachment_filename=filename, as_attachment=True, add_etags=False)
 
+# Sorted list of abstract group code snippets to download
+sorted_code_names = ["code_description", "order", "exponent", "automorphism_group", "outer_automorphism_group", "composition_factors",
+                     "nilpotency_class", "derived_length", "is_abelian", "is_cyclic", "is_elementary_abelian", "is_monomial",
+                     "is_nilpotent", "is_perfect", "is_pgroup", "is_polycyclic", "is_simple", "is_solvable", "is_supersolvable",
+                     "group_statistics", "conjugacy_classes", "character_statistics", "lie_reps_all", "presentation", "permutation",
+                     "GLZ", "GLFp", "GLZN", "GLZq", "GLFq", "transitive_all", "primary_decomposition", "abelianization",
+                     "schur_multiplier", "commutator_length", "subgroups", "center", "commutator_subgroup", "frattini_subgroup",
+                     "fitting_subgroup", "radical", "socle", "derived_series", "chief_series", "lower_central_series",
+                     "upper_central_series", "character_table"]
+
+@abstract_page.route("/<label>/codedownload/<download_type>")
+def download_group_code(label, download_type):
+    try:
+        grp = WebAbstractGroup(label)
+        code_snippets = grp.code_snippets()
+
+        # Maybe we should remove all instances of "G = " and "G := ", except for the top code snippet
+        # This ensures all the code snippets work (in sequential order) in the code download files
+        for rep in ["lie_reps_all", "permutation", "GLZ", "GLFp", "GLZN", "GLZq", "GLFq", "transitive_all"]:
+            if rep in code_snippets:
+                for lang in code_snippets[rep]:
+                    code_snippets[rep][lang] = code_snippets[rep][lang].replace("G = ", '').replace("G := ", '')
+
+        # We need to still assign the PC representation to some variable (e.g. "GPC"), for this command to work
+        if "presentation" in code_snippets:
+            for lang in code_snippets["presentation"]:
+                code_snippets["presentation"][lang] = code_snippets["presentation"][lang].replace("G :=", "GPC :=").replace("G =", "GPC =").replace("G.", "GPC.").replace("G,", "GPC,")
+
+        code = CodeSnippet(code_snippets)
+        response = make_response(code.export_code(label, download_type, sorted_code_names))
+    except Exception as err:
+        return abort(404, str(err))
+    response.headers['Content-type'] = 'text/plain'
+    return response
+
+@abstract_page.route("/search_diagram/")
+def browseDiagram():
+    info = to_dict(request.args, search_array=GroupsSearchArray())
+    info["search_type"] = "Diagram"
+    return group_search(info)
 
 class GroupsSearchArray(SearchArray):
     noun = "group"
@@ -2951,7 +3198,7 @@ class GroupsSearchArray(SearchArray):
             advanced=True
         )
         number_divisions = TextBox(
-            name="number_divisions ",
+            name="number_divisions",
             label="Number of divisions",
             knowl="group.division",
             example="3",
@@ -2960,7 +3207,7 @@ class GroupsSearchArray(SearchArray):
         )
         family = SelectBox(
             name="family",
-            options=[("", "")] + group_families(deTeX=True) + [("any", "any")],
+            options=[("", ""), ("any", "any")] + group_families(deTeX=True),
             knowl="group.families",
             label="Family",
         )
@@ -3032,48 +3279,53 @@ class SubgroupSearchArray(SearchArray):
     sorts = [("", "ambient order", ['ambient_order', 'ambient_counter', 'quotient_order', 'counter']),
              ("sub_ord", "subgroup order", ['subgroup_order', 'ambient_order', 'ambient_counter', 'counter']),
              ("sub_ind", "subgroup index", ['quotient_order', 'ambient_order', 'ambient_counter', 'counter'])]
+    jump_example = "8.3"
+    jump_egspan = "e.g. 8.3 or 12.4.2.b1.a1"
+    jump_prompt = "Group or subgroup label"
+    jump_knowl = "group.subgroup_search_input"
+
     def __init__(self):
-        abelian = YesNoBox(name="abelian", label="Abelian", knowl="group.abelian")
-        cyclic = YesNoBox(name="cyclic", label="Cyclic", knowl="group.cyclic")
-        solvable = YesNoBox(name="solvable", label="Solvable", knowl="group.solvable")
+        abelian = YesNoBox(name="abelian", label="Abelian", knowl="group.abelian", example_col=True)
+        cyclic = YesNoBox(name="cyclic", label="Cyclic", knowl="group.cyclic", example_col=True)
+        solvable = YesNoBox(name="solvable", label="Solvable", knowl="group.solvable", example_col=True)
         quotient_abelian = YesNoBox(
-            name="quotient_abelian", label="Abelian quotient", knowl="group.abelian"
+            name="quotient_abelian", label="Abelian quotient", knowl="group.abelian", example_col=True
         )
         quotient_cyclic = YesNoBox(
-            name="quotient_cyclic", label="Cyclic quotient", knowl="group.cyclic"
+            name="quotient_cyclic", label="Cyclic quotient", knowl="group.cyclic", example_col=True
         )
         quotient_solvable = YesNoBox(
-            name="quotient_solvable", label="Solvable quotient", knowl="group.solvable"
+            name="quotient_solvable", label="Solvable quotient", knowl="group.solvable", example_col=True
         )
-        perfect = YesNoBox(name="perfect", label="Perfect", knowl="group.perfect")
-        normal = YesNoBox(name="normal", label="Normal", knowl="group.subgroup.normal")
+        perfect = YesNoBox(name="perfect", label="Perfect", knowl="group.perfect", example_col=True)
+        normal = YesNoBox(name="normal", label="Normal", knowl="group.subgroup.normal", example_col=True)
         characteristic = YesNoBox(
             name="characteristic",
             label="Characteristic",
-            knowl="group.characteristic_subgroup",
+            knowl="group.characteristic_subgroup", example_col=True
         )
         maximal = YesNoBox(
-            name="maximal", label="Maximal", knowl="group.maximal_subgroup"
+            name="maximal", label="Maximal", knowl="group.maximal_subgroup", example_col=True
         )
         minimal_normal = YesNoBox(
             name="minimal_normal",
             label="Maximal quotient",
-            knowl="group.maximal_quotient",
+            knowl="group.maximal_quotient", example_col=True
         )
-        central = YesNoBox(name="central", label="Central", knowl="group.central")
+        central = YesNoBox(name="central", label="Central", knowl="group.central", example_col=True)
         direct = YesNoBox(
-            name="direct", label="Direct product", knowl="group.direct_product"
+            name="direct", label="Direct product", knowl="group.direct_product", example_col=True
         )
         split = YesNoBox(
-            name="split", label="Semidirect product", knowl="group.semidirect_product"
+            name="split", label="Semidirect product", knowl="group.semidirect_product", example_col=True
         )
         # stem = YesNoBox(
         #    name="stem",
         #    label="Stem",
         #    knowl="group.stem_extension")
-        hall = YesNoBox(name="hall", label="Hall subgroup", knowl="group.subgroup.hall")
+        hall = YesNoBox(name="hall", label="Hall subgroup", knowl="group.subgroup.hall", example_col=True)
         sylow = YesNoBox(
-            name="sylow", label="Sylow subgroup", knowl="group.sylow_subgroup"
+            name="sylow", label="Sylow subgroup", knowl="group.sylow_subgroup", example_col=True
         )
         subgroup = TextBox(
             name="subgroup",
@@ -3114,28 +3366,49 @@ class SubgroupSearchArray(SearchArray):
         )
         nontrivproper = YesNoBox(name="nontrivproper", label=display_knowl('group.trivial_subgroup', 'Non-trivial') + " " + display_knowl('group.proper_subgroup', 'proper'))
 
+        self.browse_array = [
+                        [subgroup, subgroup_order],
+                        [ambient,ambient_order],
+                        [quotient, quotient_order],
+                        [cyclic,abelian],
+                        [normal,solvable],
+                        [characteristic,perfect],
+                        [maximal,central],
+                        [direct, split],
+                        [quotient_cyclic, quotient_abelian],
+                        [quotient_solvable,minimal_normal],
+                        [nontrivproper],
+                        [hall, sylow]
+                ]
+
         self.refine_array = [
             [subgroup, subgroup_order, cyclic, abelian, solvable],
-            [normal, characteristic, perfect, maximal, central, nontrivproper],
-            [ambient, ambient_order, direct, split, hall, sylow],
+            [normal, characteristic, perfect, maximal, central],
+            [ambient, ambient_order, direct, split],
             [
                 quotient,
                 quotient_order,
                 quotient_cyclic,
                 quotient_abelian,
                 quotient_solvable,
-                minimal_normal,
             ],
+            [minimal_normal, nontrivproper, hall, sylow],
         ]
 
     def search_types(self, info):
-        # Note: info will never be None, since this isn't accessible on the browse page
-        return [("Subgroups", "Search again"), ("RandomSubgroup", "Random subgroup")]
+        if info is None:
+            return [("", "List of subgroups"), ("RandomSubgroup", "Random subgroup")]
+        return [("", "Search again"), ("RandomSubgroup", "Random subgroup")]
 
 
 class ComplexCharSearchArray(SearchArray):
     sorts = [("", "group", ['group_order', 'group_counter', 'dim', 'label']),
              ("dim", "degree", ['dim', 'group_order', 'group_counter', 'label'])]
+    jump_example = "8.3 or 12.4.1d"
+    jump_egspan = "Enter a group label or a character table label."
+    jump_prompt	= "Group or complex character label"
+    jump_knowl = "group.char_search_input"
+
     def __init__(self):
         faithful = YesNoBox(name="faithful", label="Faithful", knowl="group.representation.faithful")
         dim = TextBox(
@@ -3197,22 +3470,26 @@ class ComplexCharSearchArray(SearchArray):
             example="4",
             example_span="4, or a range line 3..5",
         )
-        #nt = TextBox(
-        #    name="nt",
-        #    label="Minimum Perm. Rep.",
-        #    knowl="group.representation.min_perm_rep",
-        #    example="[4,2]",
-        #)
+
+        self.browse_array = [
+                        [group, dim],
+                        [image_isoclass,conductor],
+                        [indicator, faithful],
+                        [image_order, kernel_order],
+                        [center_order,center_index]
+                ]
 
         self.refine_array = [
             [dim, indicator, faithful,conductor],
             [group, image_isoclass, image_order, kernel_order],
-            [center_order, center_index] #, nt]
+            [center_order, center_index]
 
         ]
+
     def search_types(self, info):
-        # Note: since we don't access this from the browse page, info will never be None
-        return [("ComplexCharacters", "Search again"), ("RandomComplexCharacter", "Random")]
+        if info is None:
+            return [("", "List of characters"), ("RandomComplexCharacter", "Random character")]
+        return [("", "Search again"), ("RandomComplexCharacter", "Random")]
 
 
 class ConjugacyClassSearchArray(SearchArray):
@@ -3221,6 +3498,10 @@ class ConjugacyClassSearchArray(SearchArray):
         ("order", "order", ['order', 'group_order', 'group_counter','size']),
         ("size", "size", ['size', 'order', 'group_order', 'group_counter']),
     ]
+    jump_example = "8.3 or 12.1.4A-1"
+    jump_egspan = "Enter a group label or the label for one conjugacy class."
+    jump_prompt = "Group or conjugacy class label"
+    jump_knowl = "group.conjugacy_class_search_input"
 
     def __init__(self):
         group = TextBox(
@@ -3244,12 +3525,19 @@ class ConjugacyClassSearchArray(SearchArray):
             example_span="4, or a range like 3..5"
         )
 
+        self.browse_array = [
+                        [group, order],
+                        [size]
+                ]
+
         self.refine_array = [
-            [group,order,size]
+            [group, order, size]
         ]
+
     def search_types(self, info):
-        # Note: since we don't access this from the browse page, info will never be None
-        return [("ConjugacyClasses", "Search again")]
+        if info is None:
+            return [("", "List of conj. classes")]
+        return [("", "Search again")]
 
 
 def abstract_group_namecache(labels, cache=None, reverse=None):
@@ -3480,7 +3768,7 @@ def group_data(label, ambient=None, aut=False, profiledata=None):
         if missing_subs(label) and gp.source == "Missing":
             ans = 'The group {} is not available in GAP, but see the list of <a href="{}">{}</a>.'.format(
                 label,
-                f"/Groups/Abstract/?subgroup_order={ord}&ambient={ambient}&search_type=Subgroups",
+                f"/Groups/Abstract/Subgroups/?subgroup_order={ord}&ambient={ambient}",
                 "subgroups with this order")
             return Markup(ans)
         ans = f"Group ${gp.tex_name}$: "
@@ -3576,7 +3864,7 @@ def group_data(label, ambient=None, aut=False, profiledata=None):
             ans += "</div><br />"
     else:
         ans += '<a href="{}">{}</a>&nbsp;'.format(
-            f"/Groups/Abstract/?subgroup_order={order}&ambient={ambient}&search_type=Subgroups",
+            f"/Groups/Abstract/Subgroups?subgroup_order={order}&ambient={ambient}",
             "Subgroups with this order")
     if label != "None":
         ans += f'<div align="right"><a href="{url}">{label} home page</a></div>'
@@ -3715,9 +4003,3 @@ def order_stats_list_to_string(o_list):
         if o_list.index(pair) != len(o_list) - 1:
             s += ","
     return s
-
-
-sorted_code_names = ['presentation', 'permutation', 'matrix', 'transitive']
-
-Fullname = {'magma': 'Magma', 'gap': 'Gap'}
-Comment = {'magma': '//', 'gap': '#'}

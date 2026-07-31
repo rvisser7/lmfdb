@@ -61,7 +61,7 @@ def raw_typeset(raw, typeset='', extra='', compressed=False):
 </span>"""
     return out
 
-def display_knowl(kid, title=None, kwargs={}):
+def display_knowl(kid, title=None, kwargs={}, strong=False):
     """
     Allows for the construction of knowls from python code
     (to be displayed using the ``safe`` flag in jinja);
@@ -78,6 +78,8 @@ def display_knowl(kid, title=None, kwargs={}):
             if title is None:
                 return f"""<span class="knowl knowl-error">'{kid}'<a href="{ url_for('knowledge.edit', ID=kid) }">Create it</a>. </span>"""
             else:
+                if strong:
+                    title = f"<strong>{title}</strong>"
                 return f"""<a href="{ url_for('knowledge.edit', ID=kid) }"><span class="knowl knowl-error">{title}</span></a>"""
         elif title is None:
             return f"""<span class="knowl knowl-error">'{kid}'</span>"""
@@ -90,6 +92,8 @@ def display_knowl(kid, title=None, kwargs={}):
             else:
                 title = ktitle
         if len(title) > 0:
+            if strong:
+                title = f"<strong>{title}</strong>"
             return '<a title="{0} [{1}]" knowl="{1}" kwargs="{2}">{3}</a>'.format(ktitle, kid, urlencode(kwargs), title)
         else:
             return ''
@@ -825,8 +829,13 @@ def sparse_cyclotomic_to_mathml(n, dat):
         if k == 0:
             return "<mn>1</mn>"
         elif n == 4:
-            assert k == 1
-            return zeta
+            # zeta = i has no subscript index, so higher powers (which can occur
+            # when the input is not reduced to a basis) are shown as superscripts.
+            if k == 1:
+                return zeta
+            if k < 0:
+                return f"<msup>{zeta}<mrow>{minus}<mn>{-k}</mn></mrow></msup>"
+            return f"<msup>{zeta}<mn>{k}</mn></msup>"
         if k == 1:
             return f"<msub>{zeta}</msub>"
         if 1 < k < 10:
