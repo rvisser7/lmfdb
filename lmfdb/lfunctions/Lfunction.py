@@ -75,7 +75,6 @@ from .LfunctionDatabase import (
     getHmfData,
     get_factors_instances,
     get_instance_by_url,
-    get_instance_by_url,
     get_instances_by_Lhash,
     get_instances_by_label,
     get_lfunction_by_Lhash,
@@ -708,122 +707,74 @@ class Lfunction_from_db(Lfunction):
         with open(os.path.join(_curdir, "code.yaml"), encoding="utf-8") as fh:
             code = yaml.load(fh, Loader=yaml.FullLoader)
 
-        data = {
-            'label': getattr(self, 'label', ''),
-            'lang': '{lang}',
-            'ainvs': getattr(self, 'ainvs', ''),
-            'level': getattr(self, 'level', ''),
-            'adelic_gens': getattr(self, 'adelic_gens', ''),
-            'origin': getattr(self, 'origin_label', ''),
-            'modulus': getattr(self, 'charactermodulus', ''),
-            'number': getattr(self, 'characternumber', ''),
-        }
+        urls = [url for _, url in self.origins]
+        def origin_url(prefix):
+            return next((u for u in urls if prefix in u), None)
+ 
+        # We construct the code snippets for the L-function depending on the origins of the L-function.
+        # L-functions can have multiple origins, so we prioritise origins which are easier to have code snippets for.
+        # (e.g. we prioritise elliptic curve before modular forms).
 
-
-        if hasattr(self, 'lfunc_data') and self.lfunc_data:
-            data['ainvs'] = self.lfunc_data.get('ainvs', data['ainvs'])
-
-        if not data['ainvs'] and getattr(self, 'label', ''):
-            try:
-                label_bits = self.label.split('-')
-                if len(label_bits) >= 3 and label_bits[0] == '2':
-                    ec_label = None
-                    origin_candidates = []
-                    if hasattr(self, 'lfunc_data') and self.lfunc_data:
-                        origin_candidates.append(str(self.lfunc_data.get('origin', '')))
-                    origin_candidates.append(str(getattr(self, 'origin', '')))
-                    if hasattr(self, 'origins') and self.origins:
-                        for name, url in self.origins:
-                            if isinstance(name, str):
-                                origin_candidates.append(name)
-                            if isinstance(url, str):
-                                origin_candidates.append(url)
-                    origin_text = ' '.join(origin_candidates).lower()
-                    is_ec_origin = any(token in origin_text for token in [
-                        'ellipticcurve',
-                        'elliptic curve',
-                        '/ellipticcurve/',
-                        '/ellipticcurve',
-                        '/ec/',
-                        '/ec',
-                    ])
-                    if is_ec_origin:
-                        if hasattr(self, 'origins') and self.origins:
-                            for name, url in self.origins:
-                                if isinstance(url, str) and 'ellipticcurve' in url.lower():
-                                    ec_label = url.split('/')[-1].rstrip('/')
-                                    break
-                        if ec_label is None and hasattr(self, 'instances') and self.instances:
-                            for _, url in self.instances:
-                                if isinstance(url, str) and 'ellipticcurve' in url.lower():
-                                    ec_label = url.split('/')[-1].rstrip('/')
-                                    break
-                        if ec_label is None:
-                            ec_label = self.label.split('-')[1]
-                        if ec_label and not ec_label.endswith('1'):
-                            ec_label = ec_label + '1'
-                    if ec_label is not None:
-                        ec_data = getEllipticCurveData(ec_label)
-                        if ec_data is not None:
-                            data['ainvs'] = ec_data.get('ainvs', data['ainvs'])
-            except Exception:
-                pass
-
-        if hasattr(self, 'charactermodulus') and self.charactermodulus is not None:
-            data['modulus'] = self.charactermodulus
-        if hasattr(self, 'characternumber') and self.characternumber is not None:
-            data['number'] = self.characternumber
-
-        origin = getattr(self, 'origin', '')
-        if origin:
-            origin = str(origin).lower()
-            if 'elliptic' in origin or 'ec' in origin:
-                data['origin_type'] = 'elliptic_curve'
-            elif 'dirichlet' in origin or 'character' in origin:
-                data['origin_type'] = 'dirichlet_character'
-            elif 'genus2' in origin or 'g2' in origin:
-                data['origin_type'] = 'genus2_curve'
-            else:
-                data['origin_type'] = 'generic'
+        # Case 1: Origin is elliptic curve
+        if origin_url('/EllipticCurve/Q/') is not None:
+            # url is /EllipticCurve/Q/<conductor>/<isogeny>, so the class label is
+            # the last TWO components joined by a dot
+            parts = url.rstrip('/').split('/')
+            curve = getEllipticCurveData("%s.%s1" % (parts[-2], parts[-1]))
+            if curve is None:
+                return None
+            origin, data = 'ec', {'ainvs': curve['ainvs']}
+ 
+        # Case 2: Origin is genus 2 curve
+        elif origin_url('/Genus2Curve/Q/') is not None:
+            parts = origin_url('/Genus2Curve/Q/').rstrip('/').split('/')
+            curve = getGenus2CurveData("%s.%s" % (parts[-2], parts[-1]))
+            if curve is None:
+                return None
+            origin, data = 'g2c', {'eqn': literal_eval(curve['eqn'])}
+ 
+        # Case 3: Origin is Dirichlet character
+        elif origin_url('/Character/Dirichlet/') is not None:
+            parts = origin_url('/Character/Dirichlet/').rstrip('/').split('/')
+            modulus, number = int(parts[-2]), int(parts[-1])
+            chi = ConreyCharacter(modulus, number)
+            zeta_order = chi.sage_zeta_order(chi.order)
+            # Sage's DirichletCharacter takes (parent, values_on_generators),
+            # not (modulus, number), so reuse the characters module's converter
+            genvalues = [] if modulus == 1 else get_sage_genvalues(
+                modulus, chi.order, chi.genvalues, zeta_order)
+            origin, data = 'dc', {
+                'modulus': modulus, 'number': number,
+                'sage_zeta_order': zeta_order,
+                'sage_dirichlet_gens': ','.join(str(v) for v in genvalues)}
+ 
         else:
-            data['origin_type'] = 'generic'
-
-        if hasattr(self, 'lfunc_data') and self.lfunc_data:
-            cdata = self.lfunc_data
-            if cdata.get('origin'):
-                origin = str(cdata.get('origin')).lower()
-                if 'elliptic' in origin or 'ec' in origin:
-                    data['origin_type'] = 'elliptic_curve'
-                elif 'dirichlet' in origin or 'character' in origin:
-                    data['origin_type'] = 'dirichlet_character'
-                elif 'genus2' in origin or 'g2' in origin:
-                    data['origin_type'] = 'genus2_curve'
-                else:
-                    data['origin_type'] = 'generic'
-
-        for prop, entries in list(code.items()):
-            if prop in {'snippet_test', 'prompt', 'frontmatter', 'show'}:
-                continue
-            if not isinstance(entries, dict):
-                continue
-            for lang, value in list(entries.items()):
-                if lang == 'comment':
-                    continue
-                if isinstance(value, str):
-                    try:
-                        value = value.format(**data)
-                    except (KeyError, IndexError, ValueError):
-                        pass
-                    if '%s' in value:
-                        replacement = data.get('ainvs') or data.get('origin') or data.get('label', '')
-                        value = value.replace('%s', str(replacement), 1)
-                    code[prop][lang] = value
-
-        if 'prompt' in code:
-            code['show'] = {lang: '' for lang in code['prompt']}
+            # no snippets implemented for this origin
+            return None
+ 
+        # Get central point
+        data['s0'] = (ZZ(self.motivic_weight) + 1) / 2
+        data['p'] = next(p for p in primes_first_n(25) if self.level % p)
+ 
+        # We override the default code snippet keys with code snippets for specific origins
+        # E.g. if L-function comes from elliptic curve, we use all code snippet ending with "_ec"
+        code['lfunction'] = code.pop('lfunction_' + origin)
+        for key in [k for k in code if k.endswith(('_ec', '_g2c', '_dc'))]:
+            if key.endswith('_' + origin):
+                code.setdefault(key[:-len(origin) - 1], {}).update(code.pop(key))
+            else:
+                code.pop(key)
+ 
+        for key in ['lfunction', 'euler_factor', 'central_value', 'derivative',
+                    'taylor', 'completed']:
+            for lang in [x for x in code[key] if x != 'comment']:
+                code[key][lang] = code[key][lang].format(**data)
+            code[key]['comment'] = code[key]['comment'].format(**data)
+ 
+        code['show'] = {lang: '' for lang in code['prompt']}
         self.code = code
         return code
-
+ 
     @lazy_attribute
     def code_snippets(self):
         return self.make_code_snippets()

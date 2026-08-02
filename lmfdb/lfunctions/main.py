@@ -1618,13 +1618,24 @@ def download(label, L=None): # the wrapper populates the L
     assert label
     return L.download()
 
-sorted_code_names = ['lfunction', 'dirichlet_series', 'degree', 'conductor', 'sign', 'zeros',
-                     'Lhalf', 'Lone']
+#sorted_code_names = ['lfunction', 'dirichlet_series', 'degree', 'conductor', 'sign', 'zeros',
+#                     'Lhalf', 'Lone']
+
+sorted_code_names = ['lfunction', 'precision', 'params', 'conductor',
+                     'dirichlet_coefficients', 'euler_factor', 'num_coeffs',
+                     'functional_equation', 'sign', 'central_value',
+                     'derivative', 'analytic_rank', 'taylor', 'completed',
+                     'hardy', 'zeros']
 
 @l_function_page.route("/<label>/download/<download_type>")
 def lf_code_download(**args):
     label = args['label']
     download_type = args['download_type']
+    if not LFUNC_LABEL_RE.fullmatch(label):
+        return abort(404, "Invalid label")
+    if download_type not in ['magma', 'gp', 'sage']:
+        return abort(404, "Invalid download type")
+
     try:
         lf = Lfunction_from_db(label=label)
         lf.make_code_snippets()
