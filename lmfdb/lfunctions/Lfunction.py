@@ -57,7 +57,7 @@ from lmfdb.utils import (
     str_to_CBF,
     web_latex,
 )
-from lmfdb.characters.TinyConrey import ConreyCharacter
+from lmfdb.characters.TinyConrey import ConreyCharacter, get_sage_genvalues
 from lmfdb.number_fields.web_number_field import WebNumberField
 from lmfdb.maass_forms.web_maassform import WebMaassForm
 from lmfdb.sato_tate_groups.main import st_link_by_name
@@ -71,6 +71,7 @@ from .Lfunctionutilities import (
     compute_local_roots_SMF2_scalar_valued,)
 from .LfunctionDatabase import (
     getEllipticCurveData,
+    getGenus2CurveData,
     getHgmData,
     getHmfData,
     get_factors_instances,
@@ -82,6 +83,7 @@ from .LfunctionDatabase import (
     get_lfunction_by_url,
     get_multiples_by_Lhash_and_trace_hash,
 )
+from ast import literal_eval
 
 
 def validate_required_args(errmsg, args, *keys):
@@ -716,7 +718,8 @@ class Lfunction_from_db(Lfunction):
         # (e.g. we prioritise elliptic curve before modular forms).
 
         # Case 1: Origin is elliptic curve
-        if origin_url('/EllipticCurve/Q/') is not None:
+        url = origin_url('/EllipticCurve/Q/')
+        if url is not None:
             # url is /EllipticCurve/Q/<conductor>/<isogeny>, so the class label is
             # the last TWO components joined by a dot
             parts = url.rstrip('/').split('/')
@@ -765,12 +768,11 @@ class Lfunction_from_db(Lfunction):
             else:
                 code.pop(key)
  
-        for key in ['lfunction', 'euler_factor', 'central_value', 'derivative',
-                    'taylor', 'completed']:
-            for lang in [x for x in code[key] if x != 'comment']:
-                code[key][lang] = code[key][lang].format(**data)
-            code[key]['comment'] = code[key]['comment'].format(**data)
- 
+        for prop in code:
+            if prop not in ['frontmatter', 'snippet_test']:
+                for lang in code[prop]:
+                    code[prop][lang] = code[prop][lang].format(**data)
+
         code['show'] = {lang: '' for lang in code['prompt']}
         self.code = code
         return code

@@ -63,10 +63,15 @@ lfunction_dc:
   oscar: |
     test
     
-
-
 # For each L-function invariant (degree, conductor, sign, etc.), we give a "generic" code snippet,
 # and then give specific code snippets which depend on the origin of the L-function (which overrides the generic snippet)
+
+# Give the Dirichlet series, or a list of Dirichlet coefficients
+dirichlet_series:
+  comment: First 10 Dirichlet coefficients
+  pari: lfunan(L, 10)
+  magma: LGetCoefficients(L, 10);
+
 
 
 # The conductor of the L-function

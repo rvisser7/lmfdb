@@ -1621,12 +1621,14 @@ def download(label, L=None): # the wrapper populates the L
 #sorted_code_names = ['lfunction', 'dirichlet_series', 'degree', 'conductor', 'sign', 'zeros',
 #                     'Lhalf', 'Lone']
 
-sorted_code_names = ['lfunction', 'precision', 'params', 'conductor',
-                     'dirichlet_coefficients', 'euler_factor', 'num_coeffs',
-                     'functional_equation', 'sign', 'central_value',
-                     'derivative', 'analytic_rank', 'taylor', 'completed',
-                     'hardy', 'zeros']
+#sorted_code_names = ['lfunction', 'precision', 'params', 'conductor',
+#                     'dirichlet_coefficients', 'euler_factor', 'num_coeffs',
+#                     'functional_equation', 'sign', 'central_value',
+#                     'derivative', 'analytic_rank', 'taylor', 'completed',
+#                     'hardy', 'zeros']
 
+sorted_code_names = ['lfunction', 'dirichlet_series', 'degree', 'conductor', 'sign', 'zeros']
+                     
 @l_function_page.route("/<label>/download/<download_type>")
 def lf_code_download(**args):
     label = args['label']
@@ -1638,10 +1640,15 @@ def lf_code_download(**args):
 
     try:
         lf = Lfunction_from_db(label=label)
-        lf.make_code_snippets()
-        code = CodeSnippet(lf.code)
-        snippet_names = [name for name in lf.code if name not in {'prompt', 'frontmatter', 'show', 'snippet_test'}]
-        response = make_response(code.export_code(label, download_type, snippet_names))
+        code_snippets = lf.make_code_snippets()
+
+        code = CodeSnippet(code_snippets)
+        names = [name for name in sorted_code_names if name in code_snippets]
+        response = make_response(code.export_code(label, download_type, names))
+        
+        #code = CodeSnippet(lf.code)
+        #names = [name for name in sorted_code_names if name in code]
+        #response = make_response(code.export_code(label, download_type, names))
 
     except Exception as err:
         return abort(404, str(err))
