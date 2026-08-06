@@ -717,7 +717,7 @@ class Lfunction_from_db(Lfunction):
         # L-functions can have multiple origins, so we prioritise origins which are easier to have code snippets for.
         # (e.g. we prioritise elliptic curve before modular forms).
 
-        # Case 1: Origin is elliptic curve
+        # Case 1: Origin is elliptic curve over Q
         url = origin_url('/EllipticCurve/Q/')
         if url is not None:
             # url is /EllipticCurve/Q/<conductor>/<isogeny>, so the class label is
@@ -728,7 +728,7 @@ class Lfunction_from_db(Lfunction):
                 return None
             origin, data = 'ec', {'ainvs': curve['ainvs']}
  
-        # Case 2: Origin is genus 2 curve
+        # Case 2: Origin is genus 2 curve over Q
         elif origin_url('/Genus2Curve/Q/') is not None:
             parts = origin_url('/Genus2Curve/Q/').rstrip('/').split('/')
             curve = getGenus2CurveData("%s.%s" % (parts[-2], parts[-1]))
@@ -762,7 +762,7 @@ class Lfunction_from_db(Lfunction):
         # We override the default code snippet keys with code snippets for specific origins
         # E.g. if L-function comes from elliptic curve, we use all code snippet ending with "_ec"
         code['lfunction'] = code.pop('lfunction_' + origin)
-        for key in [k for k in code if k.endswith(('_ec', '_g2c', '_dc'))]:
+        for key in [k for k in code if k.endswith(('_ecq', '_g2c', '_dc'))]:
             if key.endswith('_' + origin):
                 code.setdefault(key[:-len(origin) - 1], {}).update(code.pop(key))
             else:

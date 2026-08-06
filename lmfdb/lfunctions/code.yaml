@@ -14,8 +14,8 @@ frontmatter:
 # Here we give seperate code snippets for constructing  L-functions based on the origin of the L-function
 # e.g. code for elliptic curves, genus 2 curves, modular forms, Dirichlet characters, etc...
 
-lfunction_ec:
-  comment: Define the L-function of the elliptic curve
+lfunction_ecq:
+  comment: Define the L-function of the elliptic curve over Q
   sage: |
     E = EllipticCurve({ainvs})
     L = E.lseries()
@@ -81,7 +81,7 @@ conductor:
   magma: Conductor(L);
   sage: conductor(L)
   oscar: conductor(L)
-conductor_ec:
+conductor_ecq:
   sage: E.conductor()
   pari: ellglobalred(E)[1]
   magma: Conductor(E);
@@ -104,7 +104,7 @@ zeros:
   sage: L.zeros(20)
   magma: Zeros(L, 20);
   oscar: zeros(L, 20)
-zeros_ec:
+zeros_ecq:
   comment: Imaginary parts of the first 10 zeros on the critical line
   sage: L.zeros(10)
   pari: lfunzeros(L, 10)

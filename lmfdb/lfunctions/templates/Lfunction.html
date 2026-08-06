@@ -26,7 +26,7 @@
 
 
 {% if code %}
-     <p>{{ place_code('lfunction', is_top_snippet=True) }}</p>
+<div style="min-height: 2.5em;">{{ place_code('lfunction', is_top_snippet=True) }}</div>
 {% endif %}
 
 <center>
@@ -58,7 +58,7 @@
 {% endif %}
 
 <h2 style="margin-top:5px;"> {{ KNOWL('lfunction.dirichlet_series', title='Dirichlet series') }}</h2>
-{{ place_code('dirichlet_coefficients') }}
+{{ place_code('dirichlet_series') }}
 {% if dirichlet_arithmetic -%}
 <div class="arithmetic" style="margin-left:10px;">{{ dirichlet_arithmetic|safe }}</div>
 <div class="analytic nodisplay" style="margin-left:10px;">{{ dirichlet|safe }}</div>
