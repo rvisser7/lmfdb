@@ -68,7 +68,8 @@ lfunction_dc:
 # For each L-function invariant (degree, conductor, sign, etc.), we give a "generic" code snippet,
 # and then give specific code snippets which depend on the origin of the L-function (which overrides the generic snippet)
 
- 
+
+# The conductor of the L-function
 conductor:
   comment: Conductor
   pari: lfunparams(L)[1]
@@ -85,12 +86,13 @@ conductor_g2c:
   pari: lfunparams(L)[1]
   magma: Conductor(L);
   oscar: conductor(L)
-conductor_dirichlet:
+conductor_dc:
   sage: chi.conductor()
   pari: charconductor(chi)
   magma: Conductor(chi);
   oscar: conductor(chi)
 
+# The imaginary parts of the zeros on the critial line
 zeros:
   comment: Zeros on the critical line
   pari: lfunzeros(L, 20)
@@ -108,10 +110,28 @@ zeros_g2c:
   pari: lfunzeros(L, 20)
   magma: Zeros(L, 20);
   oscar: zeros(L, 20)
-zeros_dirichlet:
+zeros_dc:
   sage: L.zeros(20)
   pari: lfunzeros(L, 20)
   magma: Zeros(L, 20);
   oscar: zeros(L, 20)
 
 
+# Tests for L-function code snippets 
+snippet_test:
+  # Riemann zeta function
+  test_riemann:
+    label: 1-1-1.1-r0-0-0
+    url: L/1-1-1.1-r0-0-0/download/{lang}
+  # L-function of Dirichlet character 5.4
+  test_dc:
+    label: 1-19-19.9-r0-0-0
+    url: L/1-19-19.9-r0-0-0/download/{lang}
+  # L-function of elliptic curve 11.a
+  test_ec:
+    label: 2-11-1.1-c1-0-0
+    url: L/2-11-1.1-c1-0-0/download/{lang}
+  # L-function of genus 2 curve 169.a
+  test_g2c:
+    label: 4-13e2-1.1-c1e2-0-0
+    url: L/4-13e2-1.1-c1e2-0-0/download/{lang}

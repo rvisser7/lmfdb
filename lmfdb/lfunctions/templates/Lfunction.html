@@ -25,12 +25,8 @@
 </script>
 
 
-{% if code and code['lfunction_ec'] %}
-<p>{{ place_code('lfunction_ec', is_top_snippet=True) }}</p>
-{% elif code and code['lfunction_g2c'] %}
-<p>{{ place_code('lfunction_g2c', is_top_snippet=True) }}</p>
-{% elif code and code['lfunction_dc'] %}
-<p>{{ place_code('lfunction_dc', is_top_snippet=True) }}</p>
+{% if code %}
+     <p>{{ place_code('lfunction', is_top_snippet=True) }}</p>
 {% endif %}
 
 <center>
@@ -62,6 +58,7 @@
 {% endif %}
 
 <h2 style="margin-top:5px;"> {{ KNOWL('lfunction.dirichlet_series', title='Dirichlet series') }}</h2>
+{{ place_code('dirichlet_coefficients') }}
 {% if dirichlet_arithmetic -%}
 <div class="arithmetic" style="margin-left:10px;">{{ dirichlet_arithmetic|safe }}</div>
 <div class="analytic nodisplay" style="margin-left:10px;">{{ dirichlet|safe }}</div>
@@ -92,6 +89,7 @@
       &nbsp;&nbsp;  = &nbsp;&nbsp; \({{ conductor_factored }}\)
       {% endif %}
     </td>
+    <td> {{ place_code('conductor') }} </td>
   </tr>
 
   <tr>
@@ -259,6 +257,7 @@
 {% endif %}
 
 <h2> Imaginary part of the first few zeros on the {{ KNOWL('lfunction.critical_line', title='critical line') }}</h2>
+{{ place_code('zeros') }}
 <p>
 {% if positive_zeros %}
 <span class='redhighlight'>{{negative_zeros | safe}}</span>
