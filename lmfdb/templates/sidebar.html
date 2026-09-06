@@ -24,7 +24,7 @@
     {%- endif -%}
     {%- if entry.collapsible and entry.part2 -%}
       <span class="collapsible-container">
-        {{entry.url | safe}}
+        {{entry.title | safe}}
 	<div class="collapsible-content">
       {%- for pt2 in entry.part2 -%}
         {%- if not BETA and pt2.status == "notonbeta" -%}
@@ -95,11 +95,8 @@
       $('.collapsible-container').each(function(index) {
           var $container = $(this);
           var $content   = $container.find('.collapsible-content');
-          // Key from the container's own label, excluding the submenu itself.
-          // (The label may be a link, so we cannot just drop all children.)
-          var $label = $container.clone();
-          $label.find('.collapsible-content').remove();
-          var ownText = $.trim($label.text());
+          // Key from the container's OWN text only, excluding child elements
+          var ownText = $.trim($container.clone().children().remove().end().text());
           var key = 'lmfdb_sidebar_entry_' +
               ownText.replace(/\s+/g, '_').substring(0, 30);
           var contentId = 'lmfdb-sidebar-entry-' + index;
@@ -120,8 +117,6 @@
           $container.on('click', function(e) {
               // Let clicks inside the submenu through (links must work)
               if ($(e.target).closest('.collapsible-content').length) return;
-              // Let the parent's own link through as well
-              if ($(e.target).closest('a').length) return;
 
               e.stopPropagation();
               e.preventDefault();
