@@ -1640,6 +1640,8 @@ div.maassformplot img {
     flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
+    /* border-box, so padding-left does not push the row past its own cell */
+    box-sizing: border-box;
     width: 100%;
     cursor: pointer;
     min-width: 100%;
@@ -1649,6 +1651,9 @@ div.maassformplot img {
 
 #sidebar .collapsible-container > .collapsible-chevron {
     color: {{color.col_sidebar_links}};
+    /* 2px less than the h2 chevron, cancelling the table cell's own padding,
+       so this chevron lines up with the section chevron above it */
+    margin-right: 2px;
 }
 
 #sidebar .collapsible-chevron {
