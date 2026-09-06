@@ -1610,7 +1610,7 @@ div.maassformplot img {
 
 #sidebar table td a {
     display: block;
-    padding: 2px;
+    padding: 3px 6px;
 }
 
 #sidebar table td .subtitle {
@@ -1641,10 +1641,19 @@ div.maassformplot img {
     justify-content: space-between;
     align-items: center;
     width: 100%;
-    cursor: pointer;
     min-width: 100%;
-    padding-left: 2pt;
-    color: {{color.col_sidebar_header_links}}
+    color: {{color.col_sidebar_links}};
+}
+
+/* The label is a link to the section's own page; let it fill the row so the
+   chevron stays flush right, as in the h2 headings. */
+#sidebar .collapsible-container > a {
+    flex: 1;
+    min-width: 0;
+}
+
+#sidebar .collapsible-container > .collapsible-chevron {
+    color: {{color.col_sidebar_links}};
 }
 
 #sidebar .collapsible-chevron {
@@ -1655,7 +1664,7 @@ div.maassformplot img {
     border: 0;
     border-radius: 0;
     min-width: 0;
-    padding: 0;
+    padding: 2px;
     margin-right: 4px;
     margin-left: auto;
     display: flex;
@@ -1664,8 +1673,8 @@ div.maassformplot img {
 
 
 #sidebar .collapsible-chevron > svg {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     object-fit: contain;
     transform: rotate(0deg);
     transition: transform 0.15s ease;
@@ -1678,8 +1687,8 @@ div.maassformplot img {
 
 #sidebar .collapsible-content {
     flex-basis: 100%;
-    border-left: 2px solid {{color.col_sidebar_header_links}};
-    margin-left: 2px;
+    border-left: 2px solid {{color.col_main_l}};
+    margin-left: 10px;
     margin-top: 2px;
     padding-left: 6px;
 }
@@ -1690,7 +1699,7 @@ div.maassformplot img {
 
 #sidebar .collapsible-content .subtitle a {
     display: block;
-    padding: 2px;
+    padding: 3px 6px;
 }
 
 #sidebar .section-content {
