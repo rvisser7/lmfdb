@@ -17,3 +17,5 @@ dependencies:
   - werkzeug
   - parallel
   - pari-elldata
+  - pari-galdata
+  
