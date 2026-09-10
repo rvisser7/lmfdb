@@ -22,7 +22,7 @@ jobs:
         if: matrix.files != 'lint'
         shell: bash -l {0}
         run: |
-          sage -python lmfdb/tests/generate_snippet_tests.py generate -i magma
+          python lmfdb/tests/generate_snippet_tests.py generate -i magma
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v7
