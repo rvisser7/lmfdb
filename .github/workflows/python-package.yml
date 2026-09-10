@@ -93,7 +93,7 @@ jobs:
     - name: pip stuff
       shell: bash -l {0}
       run: |
-        sage -pip install -r requirements.txt
+        pip install -r requirements.txt
         pip install pyflakes pylint pycodestyle ruff
 
     - name: checking that we didn't miss any test files
@@ -107,14 +107,12 @@ jobs:
         LMFDB_CI_ACCESS: ${{ secrets.LMFDB_CI_ACCESS }}
       shell: bash -l {0}
       run: |
-        sage -python lmfdb/utils/config.py  --postgresql-host proddb.lmfdb.xyz  --postgresql-pass "$LMFDB_CI_ACCESS"
+        python lmfdb/utils/config.py  --postgresql-host proddb.lmfdb.xyz  --postgresql-pass "$LMFDB_CI_ACCESS"
 
     - name: Run LMFDB tests
       if: matrix.files != 'lint'
       shell: bash -l {0}
       run: tox -e tests -- ${{ matrix.files}}
-
-
 
     - name: Run linting
       if: matrix.files == 'lint'
