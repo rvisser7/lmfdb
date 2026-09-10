@@ -18,4 +18,5 @@ dependencies:
   - parallel
   - pari-elldata
   - pari-galdata
+  - gap
   
