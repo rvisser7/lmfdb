@@ -68,7 +68,7 @@ runs:
   - name: pip stuff
     shell: bash -l {0}
     run: |
-      sage -pip install -r requirements.txt
+      pip install -r requirements.txt
 
 
   # Some code snippets need optional CAS packages or database files which are not part of a default install;
