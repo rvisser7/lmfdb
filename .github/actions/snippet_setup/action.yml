@@ -4,8 +4,6 @@ description: 'Set up LMFDB environment for generating snippets'
 runs:
   using: 'composite'
   steps:
-  - uses: actions/checkout@v3
-
   - uses: conda-incubator/setup-miniconda@v2
     with:
       activate-environment: lmfdb
@@ -69,35 +67,11 @@ runs:
     shell: bash -l {0}
     run: |
       pip install -r requirements.txt
-
-
-  # Some code snippets need optional CAS packages or database files which are not part of a default install;
+ 
+  # The degree 32 transitive groups are needed for the code snippets "TransitiveGroup(32, t)".
+  # They are a supplementary download for GAP's transgrp package (~300MB, ~1.3GB unpacked).
   # See https://github.com/LMFDB/lmfdb/issues/7108.
- 
-  - name: Locate Sage's GAP package directory
-    id: gap
-    shell: bash -l {0}
-    run: |
-      transgrp=$(sage -gap -b -q -T -r -A \
-        -c 'Print("TRANSGRP:", GAPInfo.PackagesInfo.transgrp[1].InstallationPath, "\n"); QUIT;' \
-        | tr -d '\r' | sed -n 's/^TRANSGRP://p')
-      test -d "$transgrp"
-      echo "transgrp=$transgrp" >> "$GITHUB_OUTPUT"
-      echo "pkgdir=$(dirname "$transgrp")" >> "$GITHUB_OUTPUT"
- 
-  - name: Install the GAP package hap
-    shell: bash -l {0}
-    # Needed for the Schur multiplier snippet G.homology(2) in groups/abstract/code.yaml
-    run: |
-      sage -gap -b -q -T -A -c 'LoadPackage("PackageManager");
-        if InstallPackage("hap", false) <> true then ForceQuitGap(1); fi; QUIT;'
-      # move it out of the user GAP root, which the snippet runner ignores (-r)
-      find ~/.gap/pkg -mindepth 1 -maxdepth 1 \
-        -exec mv -n {} "${{ steps.gap.outputs.pkgdir }}/" \; 2>/dev/null || true
-      sage -gap -b -q -T -r -A -c 'Print("hap available: ", LoadPackage("hap"), "\n"); QUIT;'
- 
-  # The degree 32 transitive groups are a ~300MB download unpacking to ~1.3GB, so
-  # they are cached separately rather than inside the (already large) conda cache.
+  
   - name: Cache the degree 32 transitive groups
     uses: actions/cache@v3
     env:
@@ -110,6 +84,8 @@ runs:
   - name: Install the degree 32 transitive groups
     shell: bash -l {0}
     run: |
+      transgrp=$(ls -d "$CONDA_PREFIX"/{lib,share}/gap/pkg/transgrp*/ 2>/dev/null | head -n1)
+      test -d "$transgrp"
       if [ ! -d ~/.cache/transgrp/dat32 ]; then
         mkdir -p ~/.cache/transgrp /tmp/trans32
         curl -sSL https://www.math.colostate.edu/~hulpke/transgrp/trans32.tgz \
@@ -117,6 +93,15 @@ runs:
         # the archive has been distributed both with and without a leading transgrp/
         mv "$(find /tmp/trans32 -type d -name dat32 | head -n1)" ~/.cache/transgrp/dat32
       fi
-      ln -sfn ~/.cache/transgrp/dat32 "${{ steps.gap.outputs.transgrp }}/dat32"
-      sage -c 'print("degree 32 available:", libgap.TransitiveGroupsAvailable(32))'
+      ln -sfn ~/.cache/transgrp/dat32 "$transgrp/dat32"
+ 
+  - name: Check the optional CAS packages are available
+    shell: bash -l {0}
+    # -r matches the flags generate_snippet_tests.py uses, so this tests what the
+    # snippet runner will actually see; the sage line checks libgap separately.
+    run: |
+      gap -b -q -T -r -A -c 'Print("hap: ", LoadPackage("hap"), "\n");
+        Print("degree 32: ", TransitiveGroupsAvailable(32), "\n"); QUIT;'
+      sage -c 'print("degree 32 via libgap:", libgap.TransitiveGroupsAvailable(32))'
+      echo 'polgalois(x^8-x-1)' | gp -q
  
