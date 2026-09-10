@@ -20,7 +20,7 @@ jobs:
         id: testing_step
         shell: bash -l {0}
         run: |
-          sage -python lmfdb/tests/generate_snippet_tests.py generate -i magma -e snippet_error_file.md
+          python lmfdb/tests/generate_snippet_tests.py generate -i magma -e snippet_error_file.md
 
       - name: Read error file
         if: ${{ hashFiles('**/snippet_error_file.md') }}
