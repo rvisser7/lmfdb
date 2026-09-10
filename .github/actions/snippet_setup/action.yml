@@ -96,7 +96,7 @@ runs:
         mv "$(find /tmp/trans32 -type d -name dat32 | head -n1)" ~/.cache/transgrp/dat32
       fi
       ln -sfn ~/.cache/transgrp/dat32 "$transgrp/dat32"
-      ls ~/.cache/transgrp/dat32 | head -n 3
+      ls ~/.cache/transgrp/dat32 | head -n 3 || true
  
   - name: Check the optional CAS packages are available
     shell: bash -l {0}
