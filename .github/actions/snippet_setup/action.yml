@@ -84,16 +84,19 @@ runs:
   - name: Install the degree 32 transitive groups
     shell: bash -l {0}
     run: |
-      transgrp=$(ls -d "$CONDA_PREFIX"/{lib,share}/gap/pkg/transgrp*/ 2>/dev/null | head -n1)
-      test -d "$transgrp"
+      shopt -s nullglob
+      dirs=("$CONDA_PREFIX"/{lib,share}/gap/pkg/transgrp*/)
+      transgrp="${dirs[0]:-}"
+      echo "transgrp dir: $transgrp"
+      test -n "$transgrp" && test -d "$transgrp"
       if [ ! -d ~/.cache/transgrp/dat32 ]; then
         mkdir -p ~/.cache/transgrp /tmp/trans32
         curl -sSL https://www.math.colostate.edu/~hulpke/transgrp/trans32.tgz \
           | tar xz -C /tmp/trans32
-        # the archive has been distributed both with and without a leading transgrp/
         mv "$(find /tmp/trans32 -type d -name dat32 | head -n1)" ~/.cache/transgrp/dat32
       fi
       ln -sfn ~/.cache/transgrp/dat32 "$transgrp/dat32"
+      ls ~/.cache/transgrp/dat32 | head -n 3
  
   - name: Check the optional CAS packages are available
     shell: bash -l {0}
