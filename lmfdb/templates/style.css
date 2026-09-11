@@ -92,6 +92,15 @@ h2.link > a {
   padding-left: 1ch;
 }
 
+/* A paragraph's default 1em top margin wins the collapse against the heading's
+   own margin, which again leaves more space below a heading than above it.
+   This matters on the browse pages that use paragraphs rather than
+   table.browse (modular curves, abstract groups, ...). */
+#content > h2 + p,
+#content > h3 + p {
+  margin-top: 0;
+}
+
 #content ul {
   padding-left: 24px;
 }
@@ -645,6 +654,14 @@ table.browse td {
 }
 table.browse td:first-child {
   white-space: nowrap;
+}
+/* The outer rows would otherwise add their padding on top of the margin of the
+   surrounding headings, leaving more space below a heading than above it. */
+table.browse tr:first-child td {
+  padding-top: 0;
+}
+table.browse tr:last-child td {
+  padding-bottom: 0;
 }
 
 table.ntdata .knowl-header a,
