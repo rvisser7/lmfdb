@@ -48,8 +48,16 @@ h2.link > a {
     text-decoration: none;
     margin: 15px 0;
 }
-#content > h1:first-of-type,
-#content > h2:first-of-type {
+/* Suppress the top margin only when the heading really is the first thing in
+   the content area.  ":first-child" cannot be used here because #content
+   always begins with the (usually empty) #flashes div and the floated
+   raw/typeset toggle; #rawtseticonspot is rendered unconditionally by
+   homepage.html immediately before the content block, so a heading directly
+   after it is the first piece of content on the page.  If a code snippet box
+   or a top knowl intervenes, there is content above the heading and it should
+   keep its margin. */
+#content > #rawtseticonspot + h1,
+#content > #rawtseticonspot + h2 {
     margin-top: 0px;
     padding-top: 2px;
 }
