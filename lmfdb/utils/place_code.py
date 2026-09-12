@@ -46,7 +46,9 @@ class CodeSnippet():
         if code[item]:
             for L in code[item]:
                 if isinstance(code[item][L],str):
-                    lines = code[item][L].split('\n')[:-1] if '\n' in code[item][L] else [code[item][L]]
+                    lines = code[item][L].split('\n') if '\n' in code[item][L] else [code[item][L]]
+                    # remove trailing empty line if any
+                    lines = [l for l in lines if l]
                     lines = [line.replace("<", "&lt;").replace(">", "&gt;") for line in lines]
                 else:
                     lines = code[item][L]
