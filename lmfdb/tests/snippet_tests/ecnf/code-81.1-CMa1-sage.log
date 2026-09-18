@@ -18,7 +18,7 @@ sage: E.has_cm(), E.cm_discriminant()
 sage: E.rank()
 0
 sage: gens = E.gens(); gens
-[]
+()
 sage: [P.height() for P in gens]
 []
 sage: E.regulator_of_points(gens)
@@ -30,7 +30,7 @@ sage: T.order()
 sage: T.gens()
 ((-1 : -a : 1), (0 : -1 : 1))
 sage: E.local_data()
-[Local data at Fractional ideal (a + 1):
+[Local data at Fractional ideal (a - 2):
  Reduction type: bad additive
  Local minimal model: Elliptic Curve defined by y^2 + y = x^3 over Number Field in a with defining polynomial x^2 - x + 1
  Minimal discriminant valuation: 6
