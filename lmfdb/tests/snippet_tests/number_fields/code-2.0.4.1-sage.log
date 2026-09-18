@@ -11,12 +11,10 @@ sage: K.disc()
 sage: K.disc().support()
 [2]
 sage: K.automorphisms()
-[
-Ring endomorphism of Number Field in a with defining polynomial x^2 + 1
-  Defn: a |--> a,
-Ring endomorphism of Number Field in a with defining polynomial x^2 + 1
-  Defn: a |--> -a
-]
+[Ring endomorphism of Number Field in a with defining polynomial x^2 + 1
+   Defn: a |--> a,
+ Ring endomorphism of Number Field in a with defining polynomial x^2 + 1
+   Defn: a |--> -a]
 sage: K.integral_basis()
 [1, a]
 sage: K.class_group().invariants()
@@ -38,9 +36,7 @@ sage: hK = K.class_number(); wK = K.unit_group().torsion_generator().order();
 sage: 2^r1 * (2*RR(pi))^r2 * RK * hK / (wK * RR(sqrt(abs(DK))))  
 0.785398163397448
 sage: K.subfields()[1:-1]
-[
-
-]
+[]
 sage: K.galois_group()
 Galois group 2T1 (S2) with order 2 of x^2 + 1
 sage: p = 7; [(e, pr.norm().valuation(p)) for pr,e in K.factor(p)]
