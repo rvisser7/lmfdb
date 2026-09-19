@@ -416,6 +416,11 @@ body > .debug {
 .properties-header ~ .properties-header {
   margin-top: 5px;
 }
+/* When the box is collapsed, round the header's lower-left corner too,
+   matching the rounded corner of the (now hidden) body */
+.properties-header.collapsed {
+  border-bottom-left-radius: 10px;
+}
 /* Shared chevron (see lmfdbChevron in lmfdb.js), used by the left sidebar
    and the right-hand properties boxes */
 .lmfdb-chevron > svg {

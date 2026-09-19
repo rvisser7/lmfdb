@@ -72,6 +72,7 @@ $(function() {
     var key = 'lmfdb_prop_' + title.replace(/\s+/g, '_').substring(0, 30);
     if (localStorage.getItem(key) === '0') {
       $body.hide();
+      $header.addClass('collapsed');
       setExpanded(false);
     } else {
       setExpanded(true);
@@ -83,7 +84,16 @@ $(function() {
       var expanded = $chev.attr('aria-expanded') !== 'true';
       setExpanded(expanded);
       localStorage.setItem(key, expanded ? '1' : '0');
-      $body.slideToggle(150);
+      if (expanded) {
+        $header.removeClass('collapsed');   // square corner before the body appears
+        $body.slideDown(150);
+      } else {
+        $body.slideUp(150, function() {
+          // Round the corner once the body has gone, unless the user
+          // re-expanded the box while it was still sliding up
+          if ($chev.attr('aria-expanded') !== 'true') $header.addClass('collapsed');
+        });
+      }
     });
 
     // Let the whole header act as the toggle; the button remains the
