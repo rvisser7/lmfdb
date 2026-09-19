@@ -416,6 +416,21 @@ body > .debug {
 .properties-header ~ .properties-header {
   margin-top: 5px;
 }
+/* Shared chevron (see lmfdbChevron in lmfdb.js), used by the left sidebar
+   and the right-hand properties boxes */
+.lmfdb-chevron > svg {
+  width: 16px;
+  height: 16px;
+  transform: rotate(0deg);
+  transition: transform 0.15s ease;
+}
+.lmfdb-chevron > svg path {
+  stroke-width: 2.5;
+}
+.lmfdb-chevron.open > svg {
+  transform: rotate(90deg);
+}
+
 .prop-chevron {
   flex-shrink: 0;
   cursor: pointer;
@@ -424,23 +439,10 @@ body > .debug {
   border: 0;
   border-radius: 0;
   min-width: 0;
-  padding: 4px 2px 4px 10px;
-  line-height: 1;
-}
-.prop-chevron::before {
-  content: '';
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  transform: rotate(45deg);
-  vertical-align: 1px;
-  transition: transform 0.15s ease;
-}
-.prop-chevron.closed::before {
-  transform: rotate(-45deg);
-  vertical-align: 2px;
+  padding: 0 0 0 10px;
+  /* flex, so the inline SVG does not sit on the text baseline */
+  display: flex;
+  align-items: center;
 }
 
 #content {
@@ -1697,22 +1699,6 @@ div.maassformplot img {
     /* 2px less than the h2 chevron, cancelling the table cell's own padding,
        so this chevron lines up with the section chevron above it */
     margin-right: 2px;
-}
-
-#sidebar .collapsible-chevron > svg {
-    width: 16px;
-    height: 16px;
-    object-fit: contain;
-    transform: rotate(0deg);
-    transition: transform 0.15s ease;
-}
-
-#sidebar .collapsible-chevron > svg path {
-    stroke-width: 2.5;
-}
-
-#sidebar .collapsible-chevron.open > svg {
-    transform: rotate(90deg);
 }
 
 

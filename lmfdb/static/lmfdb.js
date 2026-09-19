@@ -33,6 +33,20 @@ $.fn.round_bl = function(val) {
   this.css("-moz-border-radius-bottomleft", val + "px");
 }
 
+/* Shared chevron toggle button, used by the left sidebar and the right-hand
+   properties boxes.  The SVG path is centred in its viewBox, so the chevron
+   rotates in place.  Restyle it via the .lmfdb-chevron rules in style.css. */
+function lmfdbChevron(extraClass) {
+  var $chev = $(
+    '<button type="button" class="lmfdb-chevron open">' +
+      '<svg aria-hidden="true" focusable="false" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+        '<path d="M9 6L15 12L9 18" stroke="currentColor"/>' +
+      '</svg>' +
+    '</button>');
+  if (extraClass) $chev.addClass(extraClass);
+  return $chev;
+}
+
 $(function() {
   /* Add a chevron to each properties-header that has a following properties-body,
      wired to collapse/expand only that section. */
@@ -45,12 +59,12 @@ $(function() {
     var bodyId = $body.attr('id') || 'lmfdb-properties-body-' + index;
     $body.attr('id', bodyId);
 
-    var $chev = $('<button type="button" class="prop-chevron open"></button>');
+    var $chev = lmfdbChevron('prop-chevron');
     $chev.attr('aria-controls', bodyId);
     $header.append($chev);
 
     function setExpanded(expanded) {
-      $chev.toggleClass('open', expanded).toggleClass('closed', !expanded);
+      $chev.toggleClass('open', expanded);
       $chev.attr('aria-expanded', expanded ? 'true' : 'false');
       $chev.attr('aria-label', (expanded ? 'Collapse ' : 'Expand ') + title);
     }
@@ -70,6 +84,15 @@ $(function() {
       setExpanded(expanded);
       localStorage.setItem(key, expanded ? '1' : '0');
       $body.slideToggle(150);
+    });
+
+    // Let the whole header act as the toggle; the button remains the
+    // accessible control (focus, aria-expanded, keyboard activation).
+    $header.css('cursor', 'pointer');
+    $header.on('click', function(e) {
+      if ($(e.target).closest('.prop-chevron').length) return; // button handles itself
+      if (window.getSelection && String(window.getSelection())) return; // text was selected
+      $chev.trigger('click');
     });
   });
 });
