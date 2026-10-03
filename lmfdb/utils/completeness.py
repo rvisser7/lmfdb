@@ -15,9 +15,11 @@ EXAMPLES::
 import logging
 import traceback
 from collections import defaultdict
+from decimal import Decimal, ROUND_DOWN
+from numbers import Integral
 from sage.all import (
     factor, prod, factorial, is_prime, prime_range, ZZ, NN, RR,
-    ceil, floor, RealSet, infinity, cached_function, RLF, log, sqrt)
+    ceil, floor, RealSet, infinity, cached_function, RLF)
 
 # We deliberately use the standard library logger rather than lmfdb.logger, since this
 # module is also used outside the website (e.g. from lmfdb-lite and lmfdb_search).
@@ -198,6 +200,16 @@ def to_rset(query):
 # query.get("rd") returns None both for {} and for {"rd": None}, but the former is
 # "no constraint" while the latter is the SQL predicate "rd IS NULL".
 _MISSING = object()
+
+
+def _round_down(x, digits=2):
+    """
+    Round a real number down to the given number of decimal places, returning a ``Decimal``.
+
+    Used when displaying completeness bounds of the form "less than M", where rounding up
+    could overstate the bound.
+    """
+    return Decimal(repr(float(x))).quantize(Decimal(1).scaleb(-digits), rounding=ROUND_DOWN)
 
 
 def _contains_none(value):
@@ -660,8 +672,16 @@ class CompletenessChecker:
       are complete no matter what is stored.  Ordinary coverage-based completeness
       guarantees must stay in ``checkers``, since they can depend on all relevant
       columns having been computed.
+
+    - ``null_refine`` -- an optional function ``null_refine(query, nullquery, null_cols)``,
+      called before the null-count check with the standardized single-branch query, the
+      null-count query built by ``nullcount_query`` and the set of searched columns
+      containing nulls.  It returns a (possibly narrowed) null-count query.  It may only
+      add constraints that every object matching ``query`` is known to satisfy (for
+      example a discriminant bound implied by a regulator bound), so that rows with
+      missing values which could not match the query anyway do not prevent completeness.
     """
-    def __init__(self, table, checkers, fill=[], null_override=[], precheck=None):
+    def __init__(self, table, checkers, fill=[], null_override=[], precheck=None, null_refine=None):
         self.table = table
         lookup[table] = self
         self.extract = not all(len(check) == 2 for check in checkers)
@@ -692,6 +712,7 @@ class CompletenessChecker:
         self.fill = fill
         self.null_override = null_override
         self.precheck = precheck
+        self.null_refine = null_refine
 
     def _standardize(self, query):
         """
@@ -773,9 +794,13 @@ class CompletenessChecker:
             # Ignore columns based on search_array
             if search_array is not None:
                 search_columns = {col for col in search_columns if search_array.null_column_explanations.get(col) is not False}
-            if search_columns and table.exists(nullcount_query(query, search_columns)):
-                # Query referred to a column where not all data was computed, so we cannot guarantee completeness
-                return False, None, None
+            if search_columns:
+                nullquery = nullcount_query(query, search_columns)
+                if self.null_refine is not None:
+                    nullquery = self.null_refine(query, nullquery, search_columns)
+                if table.exists(nullquery):
+                    # Query referred to a column where not all relevant data was computed, so we cannot guarantee completeness
+                    return False, None, None
         for fill in self.fill:
             fill(query)
         for cols, test, reason, caveat, filt in self.checkers:
@@ -1995,86 +2020,7 @@ class NFBound(ColTest):
                  ((7,11), (3,))],
         }
 
-        #### Regulator completeness bounds for number fields ####
-
-        # For non-CM number fields K of fixed degree/signature, one has explicit lower bounds for the regulator of the form
-        #
-        #     Reg(K) >= A * (log |D_K|)^B,
-        #
-        # where D_K is the (absolute) discriminant of K, and A, B are effectively computable constants
-        # depending only on the degree/signature of K.
-
-        # For certain small signatures (n - 2*r2, r2), we can give explicit constants for A, B (with references) below.
-
-        # Combined with the hardcoded discriminant completeness bounds stored in self._maxD[n][r2],
-        # this gives explicit regulator completeness bounds: i.e. if all fields of a given signature
-        # are known up to absolute discriminant D_max, then any search with
-        #
-        #     Reg(K) < A * (log D_max)^B
-        #
-        # is guaranteed to be complete.
-
-        # For larger signatures, where such explicit A, B may be too weak, we instead use
-        # known classifications of fields with regulator below some explicit constant.
-
-        # Some bounds also depend on additional structure (e.g. whether the field is primitive or imprimitive),
-        # which can sometimes be inferred from Galois group data.
-
-        # Here we give explicit lower bounds, for each signature, for the regulator from the literature:
-        # reg_s{ij} is the largest real number M such that we have completeness in signature [i, j],
-        # if the regulator is strictly less than M
-
-        reg_s20 = log((sqrt(self._maxD[2][0]-4) + sqrt(self._maxD[2][0]))/2)  # Real quadratic case (see Po77, Satz XIII on pg 485) - sharp
-        reg_s01 = 1.00                                                        # All imaginary quadratics have regulator 1
-        reg_s30 = (1/16) * log(self._maxD[3][0]/4)**2                         # Totally real cubic (by Cu84, Thm 1) - sharp
-        reg_s11 = (1/3) * log(self._maxD[3][1]/27)                            # Complex cubic (by Cu84 Thm 3) - sharp
-        #reg_s40_prim = 1/(80*sqrt(10)) * log(self._maxD[4][0]/16)**3         # Totally real quartic primitive (by Cu84 Thm 2)
-        reg_s40_imprim = 1/(80*sqrt(10)) * log(self._maxD[4][0]/16)**2        # Totally real quartic imprimitive (by Cu84, Thm 2b)
-        reg_s21 = 0.51                                                        # Signature (2, 1): (see ADF16, Thm 10b)
-        #reg_s02_prim = (1/4) * log(self._maxD[4][2]/256)                     # Totally complex quartic primitive (see Cu84, Thm 4)
-        reg_s02 = 0.61                                                        # Totally complex quartic (see ADF16, Thm 10c)
-        #reg_s50_cyclic = (1/25) * log(self._maxD[5][0]/16)**4                # Cyclic quintic (see Schoof-Washington 1988)
-        reg_s50 = 3.55        # by ADF16, Thm 8a
-        reg_s31 = 2.15        # by BM25, Cor 1.3
-        reg_s12 = 0.34        # by ADF16, Thm 8c
-        reg_s60 = 4.39        # by ADF16, Thm 11a
-        reg_s41 = 4.60        # by BM25, Cor 1.4
-        reg_s22 = 0.50        # by ADF16, Thm 11c
-        reg_s03 = 0.27        # by ADF16, Thm 11d
-        reg_s70 = 19.19       # by ADF16, Thm 9
-        #reg_s51 = 3.2        # by FR19, Thm
-        reg_s51 = 6.10        # by BM25, Cor 1.5
-        reg_s32 = 1.055       # by ADF16, Thm 9c
-        reg_s13 = 0.4         # by ADF16, Thm 9d
-        reg_s80 = 28.43       # by ADF16, Thm 12a
-        reg_s61 = 7.431       # by BM25, Cor 1.1
-        reg_s04 = 0.345       # by ADF16, Thm 12b
-        reg_s90 = 37.2        # by ADF16, Thm 13
-
-        # References used for regulator lower bounds:
-        # - Po77:  Pohst, Michael; Regulatorabschatzungen fur total reelle algebraische Zahlkorper. J. Number Theory 9 (1977), no. 4, 459-492.  MR0460274
-        # - Cu84:  Cusick, T. W.; Lower bounds for regulators. Number theory, Noordwijkerhout 1983 (Noordwijkerhout, 1983), 63-73. Lecture Notes in Math., 1068 Springer-Verlag, Berlin, 1984 ISBN:3-540-13356-9. MR0756083
-        # - ADF16: Astudillo, Sergio; Diaz y Diaz, Francisco; Friedman, Eduardo; Sharp lower bounds for regulators of small-degree number fields. J. Number Theory 167 (2016), 232-258. MR3504045
-        # - FR19:  Friedman, Eduardo; Ramirez-Raposo, Gabriel; Filling the gap in the table of smallest regulators up to degree 7. J. Number Theory 198 (2019), 381-385. MR3912943
-        # - BM25:  Battistoni, Francesco; Molteni, Giuseppe; Generalized Pohst inequality and small regulators. Math. Comp. 94 (2025), no. 351, 475-504. MR4807818
-
-        # maxReg[n][r2] is a real number M so that we have completeness in signature [n-2*r2, r2],
-        # as long as the regulator is strictly less than M.
-        self._maxReg = [
-            None, # n=0
-            None, # n=1
-            [reg_s20, reg_s01], # n=2
-            [reg_s30, reg_s11], # n=3
-            [reg_s40_imprim, reg_s21, reg_s02], # n=4
-            [reg_s50, reg_s31, reg_s12], # n=5
-            [reg_s60, reg_s41, reg_s22, reg_s03], # n=6
-            [reg_s70, reg_s51, reg_s32, reg_s13], # n=7
-            [reg_s80, reg_s61, None, None, reg_s04], # n=8
-            [reg_s90], # n=9
-        ]
-
-        # TODO: Add more regulator bounds for other signatures.
-        # Can also further refine bounds based on Galois group, instead of just signature.
+        # Regulator completeness bounds are given in ``regulator_bounds`` below.
 
     def display_reason(self, reasons):
         """
@@ -2092,7 +2038,7 @@ class NFBound(ColTest):
         # (n, None, Gs, None, None, None, M, None)
         # (n, None, None, S, k, None, None, None)
         # (n, None, Gs, S, k, None, None, None)
-        # (n, r2, None, None, None, None, None, R)
+        # (n, r2, None, None, None, None, None, M)   (M is the regulator completeness bound)
         # Here k (a bound on the number of ramified primes) is None unless
         # completeness depends on it (i.e. unless k < len(S)).
         # We group by None pattern
@@ -2122,7 +2068,7 @@ class NFBound(ColTest):
                 if len(set(rams)) == 1:
                     ans.append(f"unramified outside {rams[0]}")
                 else:
-                    ans.append(f"unramified outside {','.join()}")
+                    ans.append(f"unramified outside {','.join(rams)}")
             if tups[0][4] is not None:
                 nrams = [str(tup[4]) for tup in tups]
                 if len(set(nrams)) == 1:
@@ -2143,9 +2089,10 @@ class NFBound(ColTest):
                 else:
                     ans.append(f"Galois root discriminant at most {','.join(grd)}")
             if tups[0][7] is not None:
-                reg_bounds = [RR(tup[7]) for tup in tups]
+                # Round down, so that the displayed statement "regulator less than M" remains true
+                reg_bounds = [str(_round_down(tup[7])) for tup in tups]
                 if len(set(reg_bounds)) == 1:
-                    ans.append(f"regulator less than {float(reg_bounds[0]):.2f}")
+                    ans.append(f"regulator less than {reg_bounds[0]}")
                 else:
                     ans.append(f"regulator less than {','.join(reg_bounds)}")
 
@@ -2181,26 +2128,253 @@ class NFBound(ColTest):
                 D = D.intersection(bottom(m + 1))
         return D
 
+    #### Regulator completeness bounds for number fields ####
+
+    # References used for regulator bounds:
+    # - Po77:  Pohst, Michael; Regulatorabschatzungen fur total reelle algebraische Zahlkorper. J. Number Theory 9 (1977), no. 4, 459-492.  MR0460274
+    # - Cu84:  Cusick, T. W.; Lower bounds for regulators. Number theory, Noordwijkerhout 1983 (Noordwijkerhout, 1983), 63-73. Lecture Notes in Math., 1068 Springer-Verlag, Berlin, 1984 ISBN:3-540-13356-9. MR0756083
+    # - Fr89:  Friedman, Eduardo; Analytic formulas for the regulator of a number field. Invent. Math. 98 (1989), no. 3, 599-622.
+    # - ADF16: Astudillo, Sergio; Diaz y Diaz, Francisco; Friedman, Eduardo; Sharp lower bounds for regulators of small-degree number fields. J. Number Theory 167 (2016), 232-258. MR3504045
+    # - FR19:  Friedman, Eduardo; Ramirez-Raposo, Gabriel; Filling the gap in the table of smallest regulators up to degree 7. J. Number Theory 198 (2019), 381-385. MR3912943
+    # - Ba21:  Battistoni, Francesco; A conjectural improvement for inequalities related to regulators of number fields. Boll. Unione Mat. Ital. 14 (2021), no. 4, 609-627.
+    # - BM21:  Battistoni, Francesco; Molteni, Giuseppe; Generalization of a Pohst's inequality. J. Number Theory 228 (2021), 73-86.
+    # - BM25:  Battistoni, Francesco; Molteni, Giuseppe; Generalized Pohst inequality and small regulators. Math. Comp. 94 (2025), no. 351, 475-504. MR4807818
+
+    # Classifications of all number fields of signature [n-2*r2, r2] with regulator at most M.
+    # Maps (n, r2) to (M, D_M, reference), where D_M is the largest |D_K| among the classified fields,
+    # or None if not yet extracted from the reference (in which case self._maxD[n][r2] is used,
+    # which assumes that all classified fields lie in the range where the database is complete).
+    _regulator_classifications = {
+        (4, 1): (0.51, None, "ADF16, Thm 10b"),
+        (4, 2): (0.61, None, "ADF16, Thm 10c"),
+        (5, 0): (3.55, None, "ADF16, Thm 8a"),
+        (5, 1): (2.15, 25679, "BM25, Cor 1.3 (40 fields)"),
+        (5, 2): (0.34, None, "ADF16, Thm 8c"),
+        (6, 0): (4.39, None, "ADF16, Thm 11a"),
+        (6, 1): (4.60, 712603, "BM25, Cor 1.4 (136 fields)"),
+        (6, 2): (0.50, None, "ADF16, Thm 11c"),
+        (6, 3): (0.27, None, "ADF16, Thm 11d"),
+        (7, 0): (19.19, None, "ADF16, Thm 9"),
+        (7, 1): (6.10, 7495927, "BM25, Cor 1.5 (59 fields); improves 3.2 from FR19"),
+        (7, 2): (1.055, None, "ADF16, Thm 9c"),
+        (7, 3): (0.4, None, "ADF16, Thm 9d"),
+        (8, 0): (28.43, None, "ADF16, Thm 12a"),
+        (8, 1): (7.431, 69367411, "BM25, Cor 1.1 (4 fields; their discriminants are listed in Ba21, Thm 1)"),
+        (8, 4): (0.345, None, "ADF16, Thm 12b"),
+        (9, 0): (37.2, None, "ADF16, Thm 13"),
+    }
+
+    # Exact values of the Hermite constants gamma_r, for r <= 8
+    _hermite = {1: RR(1), 2: 2 / RR(3).sqrt(), 3: RR(2)**(1/3), 4: RR(2).sqrt(),
+                5: RR(8)**(1/5), 6: (RR(64) / 3)**(1/6), 7: RR(64)**(1/7), 8: RR(2)}
+
+    @staticmethod
+    def _remak_P(n, r2):
+        r"""
+        Upper bound for P_{n,r2} = prod_{i<j} |1 - eps_i/eps_j|, where eps_1, ..., eps_n are the conjugates
+        of a unit (ordered by absolute value) in a number field of signature [n-2*r2, r2].
+
+        This is the quantity bounded by n^n in the Remak-Friedman inequality (see BM25, Section 1).
+        """
+        if r2 == 0:
+            return RR(2)**(n // 2)                           # Po77 (n <= 11), BM21 (all n); sharp
+        if (n, r2) == (5, 1):
+            return 16 * RR(3)**7.5 / (4 * RR(7)**3.5)        # BM25, Thm 1; sharp (= 16.6965...)
+        if (n, r2) == (7, 1):
+            return RR(65.81)                                 # BM25, Thm 2
+        return RR(n)**(n / 2)                                # Hadamard's inequality
+
+    def regulator_bounds(self, n, r2, R):
+        r"""
+        Regulator completeness bounds for number fields of signature ``[n-2*r2, r2]``.
+
+        INPUT:
+
+        - ``n`` -- the degree
+        - ``r2`` -- the number of complex places
+        - ``R`` -- an upper bound on the regulator (a real number, or ``infinity``)
+
+        OUTPUT:
+
+        A pair ``(M, D)``, where:
+
+        - ``M`` is the regulator completeness bound for this signature: every number field
+          of this signature with regulator strictly less than ``M`` is in the database
+          (``None`` if no regulator bound is known for this signature).  This is used to
+          display the reason for completeness.
+        - ``D`` is an upper bound on ``|D_K|``, valid for every field ``K`` of this signature
+          with ``Reg(K) <= R`` (``infinity`` if no such bound is known).
+
+        Searches in this signature with regulator at most ``R`` are complete
+        whenever ``D <= self._maxD[n][r2]``.
+
+        Three kinds of results are used:
+
+        - Explicit lower bounds ``Reg(K) >= f(|D_K|)`` in degrees 2, 3 and 4, valid for every
+          field of the signature, which we invert to get ``|D_K| <= f^{-1}(R)``.
+        - In prime degree, the Remak-Friedman inequality (Fr89, Lemma 3.4; see BM25,
+          Props 1 and 2), which also bounds ``|D_K|`` in terms of ``Reg(K)`` for every field of
+          the signature.
+        - Classifications of all fields with ``Reg(K) <= M`` for an explicit constant ``M``.
+          These only give a discriminant bound when ``R < M``.  They are needed e.g. for
+          signatures containing CM fields, where no bound of the first two kinds can hold.
+
+        When several results apply, we return the largest ``M`` and the smallest ``D``.
+        """
+        if not (2 <= n < len(self._maxD) and 0 <= r2 <= n // 2):
+            return None, infinity
+        Dmax = self._maxD[n][r2]
+        if R < infinity:
+            R = max(RR(R), RR(0))    # regulators are positive; avoids roots of negative numbers below
+        else:
+            R = infinity
+
+        def disc_bound(f):
+            # Upper bound ceil(f(R)) on |D_K|.  We take the ceiling rather than the floor so that
+            # floating point error cannot push the bound below the true value.
+            return infinity if R is infinity else ceil(f(R))
+
+        ## Explicit lower bounds Reg(K) >= f(|D_K|), valid for all fields of the signature ##
+
+        if (n, r2) == (2, 0):
+            # Real quadratic [Po77, Satz XIII on pg 485] (sharp): Reg(K) >= log((sqrt(|D|-4) + sqrt(|D|))/2),
+            # equivalently |D_K| <= 4*cosh(Reg(K))^2
+            M = ((RR(Dmax - 4).sqrt() + RR(Dmax).sqrt()) / 2).log()
+            return M, disc_bound(lambda x: 4 * x.cosh()**2)
+
+        if (n, r2) == (2, 1):
+            # Every imaginary quadratic field has regulator 1, so Reg(K) < 1 gives no fields
+            return RR(1), (0 if R < 1 else infinity)
+
+        if (n, r2) == (3, 0):
+            # Totally real cubic [Cu84, Thm 1] (sharp): Reg(K) >= (1/16) * log(|D|/4)^2,
+            # equivalently |D_K| <= 4*exp(4*sqrt(Reg(K)))
+            M = (RR(Dmax) / 4).log()**2 / 16
+            return M, disc_bound(lambda x: 4 * (4 * x.sqrt()).exp())
+
+        if (n, r2) == (3, 1):
+            # Complex cubic [Cu84, Thm 3] (sharp): Reg(K) >= (1/3) * log(|D|/27),
+            # equivalently |D_K| <= 27*exp(3*Reg(K))
+            M = (RR(Dmax) / 27).log() / 3
+            return M, disc_bound(lambda x: 27 * (3 * x).exp())
+
+        if (n, r2) == (4, 0):
+            # Totally real quartic [Cu84, Thm 2b]: Reg(K) >= c * log(|D|/16)^2, with c = 1/(80*sqrt(10)).
+            # This is the bound for imprimitive fields; primitive fields satisfy the stronger
+            # Reg(K) >= c * log(|D|/16)^3 [Cu84, Thm 2], which implies it since log(|D|/16) >= 1
+            # for every totally real quartic field (|D| >= 725).
+            # Equivalently |D_K| <= 16*exp(sqrt(Reg(K)/c))
+            c = 1 / (80 * RR(10).sqrt())
+            M = c * (RR(Dmax) / 16).log()**2
+            return M, disc_bound(lambda x: 16 * (x / c).sqrt().exp())
+
+        candidates = []   # (M, D) pairs from each applicable result
+
+        ## Remak-Friedman inequality, in prime degree ##
+
+        # In prime degree n, every unit eps which is not a root of unity generates K.  Choosing eps
+        # of minimal length in the log-unit lattice (Minkowski) gives, for every field of the signature,
+        #
+        #     log|D_K| <= 2 log P_{n,r2} + A * sqrt(gamma_r) * (sqrt(r+1) * Reg(K))^(1/r),
+        #
+        # where r is the unit rank and A = sqrt((n^3 - n - 4 r2^3 - 2 r2)/3)  [Fr89, Lemma 3.4], [BM25, Props 1-2].
+        # In degree 11 and above the resulting bounds are too weak to be useful.
+        if n in (5, 7):
+            r = (n - 2*r2) + r2 - 1
+            c = RR((n**3 - n - 4*r2**3 - 2*r2) / 3).sqrt() * self._hermite[r].sqrt()
+            logP2 = 2 * self._remak_P(n, r2).log()
+            t = (RR(Dmax).log() - logP2) / c
+            M = t**r / RR(r + 1).sqrt() if t > 0 else None
+            D = disc_bound(lambda x: (logP2 + c * (RR(r + 1).sqrt() * x)**(1 / r)).exp())
+            candidates.append((M, D))
+
+        ## Classifications of all fields with Reg(K) <= M ##
+
+        if (n, r2) in self._regulator_classifications:
+            M, DM, _ = self._regulator_classifications[(n, r2)]
+            if DM is None:
+                DM = Dmax
+            # We subtract a small epsilon so that floating point inputs right at the boundary are not certified
+            candidates.append((RR(M) if DM <= Dmax else None, DM if R < M - 0.00001 else infinity))
+
+        # TODO: Add more regulator bounds, e.g. ones depending on the Galois group rather than just the signature:
+        # - totally real quartic primitive: Reg(K) >= 1/(80*sqrt(10)) * log(|D|/16)^3   (Cu84, Thm 2)
+        # - totally complex quartic primitive: Reg(K) >= (1/4) * log(|D|/256)            (Cu84, Thm 4)
+        # - cyclic quintic: Reg(K) >= (1/25) * log(|D|/16)^4                             (Schoof-Washington 1988)
+        # The analytic lower bound Reg(K) >= 2*g(1/|D_K|) of Fr89 (as used in ADF16 and BM25) could also extend
+        # the ranges above, but requires a rigorous evaluation of the function g.
+
+        Ms = [M for M, _ in candidates if M is not None]
+        return (max(Ms) if Ms else None), min([D for _, D in candidates], default=infinity)
+
+    def regulator_disc_bound(self, query):
+        r"""
+        An upper bound on ``|D_K|`` for every number field ``K`` satisfying the degree, signature
+        and regulator constraints of ``query``, or ``infinity`` if no such bound is known.
+        """
+        n = query.get("degree")
+        if not isinstance(n, Integral) or not (2 <= n < len(self._maxD)):
+            return infinity
+        for key in ("r2", "regulator"):
+            value = query.get(key, _MISSING)
+            if value is not _MISSING and _contains_none(value):
+                return infinity
+        try:
+            R = NumberSet(query.get("regulator"))
+            r2opts = list(IntegerSet(query.get("r2")).intersection(IntegerSet([0, n // 2])))
+        except (ValueError, TypeError):
+            return infinity
+        sign = query.get("disc_sign")
+        if sign == 1:
+            r2opts = [r2 for r2 in r2opts if r2 % 2 == 0]
+        elif sign == -1:
+            r2opts = [r2 for r2 in r2opts if r2 % 2 == 1]
+        if not R or not r2opts:
+            return 0           # no number field satisfies these constraints
+        Rmax = R.rset.sup()
+        return max(self.regulator_bounds(n, r2, Rmax)[1] for r2 in r2opts)
+
+    def null_refine(self, query, nullquery, null_cols):
+        r"""
+        Narrow the null-count query when the query constrains the regulator.
+
+        This is registered as the ``null_refine`` hook of the nf_fields CompletenessChecker.
+        A regulator bound implies a discriminant bound (see ``regulator_bounds``), so fields with
+        an uncomputed regulator and larger discriminant cannot satisfy the query, and should not
+        prevent completeness.  Fields with an uncomputed regulator within the discriminant bound
+        still do.
+        """
+        if "regulator" not in null_cols:
+            return nullquery
+        D = self.regulator_disc_bound(query)
+        if D is infinity:
+            return nullquery
+        bound = {"disc_abs": {"$lte": int(D)}}
+        if "disc_abs" in nullquery:
+            return {"$and": [nullquery, bound]}
+        nullquery = dict(nullquery)
+        nullquery.update(bound)
+        return nullquery
+
     def clear_regulator(self, n, R, r2opts, reasons):
         """
-        Remove signatures (n-2*r2, r2) already certified complete using the regulator bounds in self._maxReg[n][r2],
-        and restrict the remaining regulator range accordingly.
+        Remove signatures (n-2*r2, r2) certified complete using the regulator bounds in ``regulator_bounds``,
+        by converting the regulator bound into a discriminant bound, and comparing with self._maxD[n][r2].
+        Also restrict the remaining regulator range accordingly.
         (Todo: Currently the returned regulator range for R isn't being used - this might be used in future when certifying Galois groups)
         """
-
-        if 2 <= n < len(self._maxReg):
-            m = infinity
-            for r2 in set(r2opts):
-                maxReg = self._maxReg[n][r2] if r2 < len(self._maxReg[n]) else None
-                if maxReg is None:
-                    continue          # No regulator bound known for this signature
-                M = maxReg - 0.00001  # Completeness only guaranteed if R *strictly less* than M
-                if R.bounded(M):
-                    r2opts.remove(r2)
-                    reasons.add((n, r2, None, None, None, None, None, maxReg))
-                m = min(m, M)
-            if m is not infinity:
-                R = R.intersection(bottom(m))
+        Rmax = R.rset.sup() if R else 0
+        m = infinity
+        for r2 in set(r2opts):
+            M, D = self.regulator_bounds(n, r2, Rmax)
+            if M is None:
+                continue          # No regulator bound known for this signature
+            if D <= self._maxD[n][r2]:
+                r2opts.remove(r2)
+                reasons.add((n, r2, None, None, None, None, None, M))
+            m = min(m, M)
+        if m is not infinity:
+            R = R.intersection(bottom(m, NumberSet))
         return R
 
     def clear_r2G(self, n, D, r2opts, galt, reasons):
@@ -3013,7 +3187,7 @@ CompletenessChecker("belyi_galmaps", [("deg", Bound(6), "Belyi maps of degree at
 # The precheck recognizes intrinsically impossible rd/grd ranges before the null-count
 # machinery issues its (potentially expensive) database queries.
 nf_bound = NFBound()
-CompletenessChecker("nf_fields", [((), nf_bound)], precheck=nf_bound.precheck)
+CompletenessChecker("nf_fields", [((), nf_bound)], precheck=nf_bound.precheck, null_refine=nf_bound.null_refine)
 
 
 CompletenessChecker("lf_fields", [(("n", "p"), Bound(23, 199), "p-adic fields of degree at most 23 and residue characteristic at most 199")], fill=[MulFiller("n", "e", "f")])

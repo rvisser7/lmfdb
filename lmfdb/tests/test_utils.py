@@ -33,6 +33,7 @@ from lmfdb.utils import (
 from lmfdb.utils.completeness import (
     results_complete,
     lookup,
+    nf_bound,
     IntegerSet,
     top,
     bottom,
@@ -401,7 +402,8 @@ class UtilsTest(unittest.TestCase):
                 caveat = None
             else:
                 tbl, query, reason, caveat = tup
-            self.assertEqual(results_complete(tbl, query, db), (True, reason, caveat))
+            with self.subTest(table=tbl, query=query):
+                self.assertEqual(results_complete(tbl, query, db), (True, reason, caveat))
 
         # The search maxp=2,5-23 parses to a top-level $or, giving a reason built from
         # several clauses; since these are collected in a set we only check for inclusion.
@@ -501,3 +503,62 @@ class UtilsTest(unittest.TestCase):
         ]:
             with self.subTest(query=query):
                 self.assertIsNone(lookup["nf_fields"].precheck(query))
+
+    def test_regulator_bounds(self):
+        # Regulator completeness bounds M, and discriminant bounds D for fields with Reg(K) <= R
+        # (no database access needed)
+        for n, r2, R, M, D in [
+                (2, 0, 5, 7.25432, 22029),        # Po77: |D| <= 4*cosh(R)^2
+                (2, 1, 0.999, 1, 0),              # imaginary quadratic fields have regulator 1
+                (3, 1, 2, 3.91202, 10893),        # Cu84: |D| <= 27*exp(3R)
+                (5, 0, 8, 8.37935, 83510646),     # Remak-Friedman (prime degree)
+                (5, 1, 2, 2.15, 25679),           # BM25, Cor 1.3
+                (7, 1, 6, 6.10, 7495927),         # BM25, Cor 1.5
+        ]:
+            with self.subTest(n=n, r2=r2, R=R):
+                Mc, Dc = nf_bound.regulator_bounds(n, r2, R)
+                self.assertAlmostEqual(float(Mc), M, places=4)
+                self.assertEqual(Dc, D)
+        # No discriminant bound: regulator at least the classification bound (CM fields exist above it),
+        # or no regulator bound known at all
+        for n, r2, R in [(2, 1, 1), (4, 2, 0.963), (6, 3, 2.102), (8, 2, 1)]:
+            with self.subTest(n=n, r2=r2, R=R):
+                self.assertIs(nf_bound.regulator_bounds(n, r2, R)[1], infinity)
+
+    def test_null_refine_regulator(self):
+        # Fields with an uncomputed regulator but larger discriminant than the regulator bound allows
+        # should not block completeness (no database access needed)
+        query = {'degree': 4, 'r2': 1, 'regulator': {'$gte': 0, '$lte': 0.5}}
+        nullquery = {'degree': 4, 'r2': 1, 'regulator': None}
+        self.assertEqual(nf_bound.null_refine(query, nullquery, {'regulator'}),
+                         {'degree': 4, 'r2': 1, 'regulator': None, 'disc_abs': {'$lte': 4000000}})
+        # Existing discriminant constraints are kept
+        query['disc_abs'] = {'$gte': 1000}
+        nullquery['disc_abs'] = {'$gte': 1000}
+        self.assertEqual(nf_bound.null_refine(query, nullquery, {'regulator'}),
+                         {'$and': [nullquery, {'disc_abs': {'$lte': 4000000}}]})
+        # No narrowing when the regulator bound gives no discriminant bound for some allowed
+        # signature, or when the regulator is not one of the columns containing nulls
+        for query, null_cols in [
+                ({'degree': 4, 'r2': 2, 'regulator': {'$lte': 0.963}}, {'regulator'}),
+                ({'degree': 8, 'regulator': {'$lte': 1}}, {'regulator'}),   # no regulator bound for signature [4,2]
+                ({'degree': 4, 'r2': 1, 'regulator': {'$lte': 0.5}}, {'class_number'}),
+        ]:
+            with self.subTest(query=query, null_cols=null_cols):
+                nullquery = {'degree': 4, 'class_number': None}
+                self.assertEqual(nf_bound.null_refine(query, nullquery, null_cols), nullquery)
+
+    def test_regulator_classifications(self):
+        # Check the hardcoded classifications of fields with small regulator against the database:
+        # every field with regulator at most M must have |D| at most D_M, and where the reference
+        # gives the number of such fields, the counts must agree.
+        from lmfdb import db
+        counts = {(5, 1): 40, (6, 1): 136, (7, 1): 59, (8, 1): 4}   # BM25, Cors 1.1, 1.3, 1.4, 1.5
+        for (n, r2), (M, DM, ref) in nf_bound._regulator_classifications.items():
+            if DM is None:
+                continue
+            with self.subTest(signature=(n - 2*r2, r2), ref=ref):
+                query = {'degree': n, 'r2': r2, 'regulator': {'$lte': M}}
+                self.assertLessEqual(db.nf_fields.max('disc_abs', query), DM)
+                if (n, r2) in counts:
+                    self.assertEqual(db.nf_fields.count(query), counts[(n, r2)])
