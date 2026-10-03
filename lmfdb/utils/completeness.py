@@ -17,7 +17,7 @@ import traceback
 from collections import defaultdict
 from sage.all import (
     factor, prod, factorial, is_prime, prime_range, ZZ, NN, RR,
-    ceil, floor, RealSet, infinity, cached_function, RLF, log, sqrt)
+    ceil, floor, RealSet, infinity, cached_function, RLF, RIF, log, sqrt)
 
 # We deliberately use the standard library logger rather than lmfdb.logger, since this
 # module is also used outside the website (e.g. from lmfdb-lite and lmfdb_search).
@@ -660,8 +660,18 @@ class CompletenessChecker:
       are complete no matter what is stored.  Ordinary coverage-based completeness
       guarantees must stay in ``checkers``, since they can depend on all relevant
       columns having been computed.
+
+    - ``implied`` -- an optional function taking a standardized single-branch query
+      dictionary and returning either ``None`` or a dictionary of additional psycodict
+      constraints that every mathematical object satisfying the query provably satisfies
+      (e.g. an upper bound on the discriminant forced by an upper bound on the regulator).
+      These constraints are used only to narrow the null-count query: a row with an
+      uncomputed value in a searched column that violates an implied constraint cannot
+      satisfy the query, so it does not threaten completeness.  Implied constraints are
+      ignored if they refer to a column that itself contains nulls, since such a constraint
+      would silently exclude rows rather than narrow the search.
     """
-    def __init__(self, table, checkers, fill=[], null_override=[], precheck=None):
+    def __init__(self, table, checkers, fill=[], null_override=[], precheck=None, implied=None):
         self.table = table
         lookup[table] = self
         self.extract = not all(len(check) == 2 for check in checkers)
@@ -692,6 +702,7 @@ class CompletenessChecker:
         self.fill = fill
         self.null_override = null_override
         self.precheck = precheck
+        self.implied = implied
 
     def _standardize(self, query):
         """
@@ -773,7 +784,13 @@ class CompletenessChecker:
             # Ignore columns based on search_array
             if search_array is not None:
                 search_columns = {col for col in search_columns if search_array.null_column_explanations.get(col) is not False}
-            if search_columns and table.exists(nullcount_query(query, search_columns)):
+            if search_columns:
+                null_query = nullcount_query(query, search_columns)
+                if self.implied is not None:
+                    extra = self.implied(query)
+                    if extra and not set(extra).intersection(nulls):
+                        null_query = {"$and": [null_query, extra]}
+            if search_columns and table.exists(null_query):
                 # Query referred to a column where not all data was computed, so we cannot guarantee completeness
                 return False, None, None
         for fill in self.fill:
@@ -2024,12 +2041,6 @@ class NFBound(ColTest):
         # reg_s{ij} is the largest real number M such that we have completeness in signature [i, j],
         # if the regulator is strictly less than M
 
-        reg_s20 = log((sqrt(self._maxD[2][0]-4) + sqrt(self._maxD[2][0]))/2)  # Real quadratic case (see Po77, Satz XIII on pg 485) - sharp
-        reg_s01 = 1.00                                                        # All imaginary quadratics have regulator 1
-        reg_s30 = (1/16) * log(self._maxD[3][0]/4)**2                         # Totally real cubic (by Cu84, Thm 1) - sharp
-        reg_s11 = (1/3) * log(self._maxD[3][1]/27)                            # Complex cubic (by Cu84 Thm 3) - sharp
-        #reg_s40_prim = 1/(80*sqrt(10)) * log(self._maxD[4][0]/16)**3         # Totally real quartic primitive (by Cu84 Thm 2)
-        reg_s40_imprim = 1/(80*sqrt(10)) * log(self._maxD[4][0]/16)**2        # Totally real quartic imprimitive (by Cu84, Thm 2b)
         reg_s21 = 0.51                                                        # Signature (2, 1): (see ADF16, Thm 10b)
         #reg_s02_prim = (1/4) * log(self._maxD[4][2]/256)                     # Totally complex quartic primitive (see Cu84, Thm 4)
         reg_s02 = 0.61                                                        # Totally complex quartic (see ADF16, Thm 10c)
@@ -2060,12 +2071,15 @@ class NFBound(ColTest):
 
         # maxReg[n][r2] is a real number M so that we have completeness in signature [n-2*r2, r2],
         # as long as the regulator is strictly less than M.
+        # Signatures with an explicit lower bound Reg(K) >= f(|D_K|) are handled by
+        # self._reg_disc below instead (entries None here), since there the regulator bound
+        # can be converted into a discriminant bound.
         self._maxReg = [
             None, # n=0
             None, # n=1
-            [reg_s20, reg_s01], # n=2
-            [reg_s30, reg_s11], # n=3
-            [reg_s40_imprim, reg_s21, reg_s02], # n=4
+            [None, None], # n=2: see self._reg_disc (and unit rank 0 for r2=1)
+            [None, None], # n=3: see self._reg_disc
+            [None, reg_s21, reg_s02], # n=4: r2=0 see self._reg_disc
             [reg_s50, reg_s31, reg_s12], # n=5
             [reg_s60, reg_s41, reg_s22, reg_s03], # n=6
             [reg_s70, reg_s51, reg_s32, reg_s13], # n=7
@@ -2073,8 +2087,30 @@ class NFBound(ColTest):
             [reg_s90], # n=9
         ]
 
-        # TODO: Add more regulator bounds for other signatures.
-        # Can also further refine bounds based on Galois group, instead of just signature.
+        # Explicit lower bounds Reg(K) >= f(|D_K|), with f increasing, stored via their inverses.
+        # _reg_disc[(n, r2)] is a list of pairs (ts, g) such that every number field K of signature
+        # [n-2*r2, r2], Galois group nTt with t in ts (ts=None meaning all t), and Reg(K) <= R
+        # satisfies |D_K| <= g(R).  Here R is passed as a RealIntervalField element, and g must
+        # return an interval containing the true value, so that rounding errors are accounted for.
+        # The ts in each list must together cover all transitive groups of degree n.
+        c4 = 80 * RIF(10).sqrt()
+        self._reg_disc = {
+            # Real quadratic: Reg >= log((sqrt(D-4) + sqrt(D))/2) (Po77, Satz XIII), sharp.
+            # Inverting gives D <= (e^R + e^-R)^2 = 4 cosh(R)^2.
+            (2, 0): [(None, lambda R: (R.exp() + (-R).exp())**2)],
+            # Totally real cubic: Reg >= (1/16) log(D/4)^2 (Cu84, Thm 1).
+            (3, 0): [(None, lambda R: 4 * (4 * R.sqrt()).exp())],
+            # Complex cubic: Reg >= (1/3) log(|D|/27) (Cu84, Thm 3).
+            (3, 1): [(None, lambda R: 27 * (3 * R).exp())],
+            # Totally real quartic:
+            #   imprimitive (4T1, 4T2, 4T3): Reg >= log(D/16)^2 / (80 sqrt(10))  (Cu84, Thm 2b)
+            #   primitive   (4T4, 4T5):      Reg >= log(D/16)^3 / (80 sqrt(10))  (Cu84, Thm 2)
+            (4, 0): [((1, 2, 3), lambda R: 16 * (c4 * R).sqrt().exp()),
+                     ((4, 5), lambda R: 16 * ((c4 * R)**(RIF(1) / 3)).exp())],
+        }
+
+        # TODO: Add more regulator bounds for other signatures (e.g. Friedman's analytic lower
+        # bound, which is explicit for every signature, could be inverted numerically).
 
     def display_reason(self, reasons):
         """
@@ -2122,7 +2158,7 @@ class NFBound(ColTest):
                 if len(set(rams)) == 1:
                     ans.append(f"unramified outside {rams[0]}")
                 else:
-                    ans.append(f"unramified outside {','.join()}")
+                    ans.append(f"unramified outside {','.join(rams)}")
             if tups[0][4] is not None:
                 nrams = [str(tup[4]) for tup in tups]
                 if len(set(nrams)) == 1:
@@ -2143,11 +2179,14 @@ class NFBound(ColTest):
                 else:
                     ans.append(f"Galois root discriminant at most {','.join(grd)}")
             if tups[0][7] is not None:
-                reg_bounds = [RR(tup[7]) for tup in tups]
+                # tup[7] is the (supremum of the) regulator bound in the query, which we certified
+                # as a closed bound, so "at most" is accurate.  We avoid rounding, which could
+                # overstate the result.
+                reg_bounds = [self._display_real(tup[7]) for tup in tups]
                 if len(set(reg_bounds)) == 1:
-                    ans.append(f"regulator less than {float(reg_bounds[0]):.2f}")
+                    ans.append(f"regulator at most {reg_bounds[0]}")
                 else:
-                    ans.append(f"regulator less than {','.join(reg_bounds)}")
+                    ans.append(f"regulator at most {','.join(reg_bounds)}")
 
             return ", ".join(ans)
         strings = []
@@ -2163,6 +2202,11 @@ class NFBound(ColTest):
         if len(non_incomp) + len(by_pattern) > 0:
             strings = non_incomp
         return "number fields with " + "; ".join(strings + [describe(V) for V in by_pattern.values()])
+
+    @staticmethod
+    def _display_real(x):
+        s = repr(float(x))
+        return s[:-2] if s.endswith(".0") else s
 
     def clear_signatures(self, n, D, r2opts, reasons):
         """
@@ -2181,27 +2225,163 @@ class NFBound(ColTest):
                 D = D.intersection(bottom(m + 1))
         return D
 
-    def clear_regulator(self, n, R, r2opts, reasons):
+    def reg_disc_bounds(self, n, r2, R):
         """
-        Remove signatures (n-2*r2, r2) already certified complete using the regulator bounds in self._maxReg[n][r2],
-        and restrict the remaining regulator range accordingly.
-        (Todo: Currently the returned regulator range for R isn't being used - this might be used in future when certifying Galois groups)
-        """
+        Convert a regulator bound into discriminant bounds.
 
-        if 2 <= n < len(self._maxReg):
-            m = infinity
-            for r2 in set(r2opts):
-                maxReg = self._maxReg[n][r2] if r2 < len(self._maxReg[n]) else None
-                if maxReg is None:
-                    continue          # No regulator bound known for this signature
-                M = maxReg - 0.00001  # Completeness only guaranteed if R *strictly less* than M
-                if R.bounded(M):
+        INPUT:
+
+        - ``n``, ``r2`` -- the degree and number of complex places
+        - ``R`` -- a real number (or +Infinity)
+
+        OUTPUT:
+
+        ``None`` if no explicit bound is known.  Otherwise a list of pairs ``(ts, M)`` such that
+        every number field K of signature [n-2*r2, r2] with Galois group nTt (t in ``ts``, where
+        ``ts=None`` means all t) and Reg(K) <= R has |D_K| <= M.  The ``ts`` cover all t.
+
+        EXAMPLES::
+
+            sage: from lmfdb.utils.completeness import nf_bound
+            sage: nf_bound.reg_disc_bounds(2, 0, log((1+sqrt(5))/2))  # Q(sqrt 5)
+            [(None, 5)]
+            sage: nf_bound.reg_disc_bounds(2, 1, 0.9)  # imaginary quadratic fields have regulator 1
+            [(None, 0)]
+            sage: nf_bound.reg_disc_bounds(2, 1, 1) is None
+            True
+        """
+        if R == infinity:
+            return None
+        if R < 0:
+            return [(None, 0)]  # regulators are positive
+        if n - r2 == 1:
+            # Unit rank 0 (Q and imaginary quadratic fields), where the regulator is 1
+            return [(None, 0)] if R < 1 else None
+        L = self._reg_disc.get((n, r2))
+        if L is None:
+            return None
+        R = RIF(R)
+        return [(ts, ZZ(g(R).upper().floor())) for ts, g in L]
+
+    def implied(self, query):
+        """
+        Constraints implied by the query, used to narrow the null-count query (see the
+        ``implied`` argument of CompletenessChecker).
+
+        Currently: an upper bound on the regulator, together with finitely many possible
+        signatures that all have explicit lower bounds Reg(K) >= f(|D_K|), implies an upper
+        bound on the absolute discriminant.  So fields of large discriminant with uncomputed
+        regulator do not prevent a completeness statement.
+        """
+        reg = query.get("regulator", _MISSING)
+        if reg is _MISSING or _contains_none(reg) or "degree" not in query:
+            return None
+        try:
+            reg = NumberSet(reg)
+            degs = IntegerSet(query["degree"]).intersection(bottom(1))
+            r2s = IntegerSet(query.get("r2"))
+        except (ValueError, TypeError):
+            return None
+        if not reg or not degs or not degs.is_finite() or degs.max() > 47:
+            return None
+        R = reg.rset.sup()
+        Dmax = 0
+        for n in degs:
+            galt = self._query_galt(n, query)
+            for r2 in r2s.intersection(IntegerSet([0, n // 2])):
+                bounds = self.reg_disc_bounds(n, r2, R)
+                if bounds is None:
+                    return None
+                # Only Galois groups allowed by the query contribute
+                Dmax = max([Dmax] + [M for ts, M in bounds
+                                     if ts is None or galt is None or galt.intersection(ts)])
+        return {"disc_abs": {"$lte": Dmax}}
+
+    def _query_galt(self, n, query):
+        """
+        The set of t so that nTt satisfies the Galois constraints of the query,
+        or None if this cannot be determined.
+        """
+        if n >= len(self._num_trans):
+            return None
+        try:
+            return self.galt(n, query.get("galois_label"), query.get("is_galois"),
+                             query.get("gal_is_cyclic"), query.get("gal_is_abelian"),
+                             query.get("gal_is_solvable"))
+        except ValueError:
+            return None
+
+    def clear_regulator(self, n, D, reg, r2opts, galt, reasons):
+        """
+        Remove signatures (n-2*r2, r2) that can be certified complete using the regulator bound.
+
+        Where an explicit lower bound Reg(K) >= f(|D_K|) is known (self._reg_disc), the regulator
+        bound is converted into discriminant bounds (possibly depending on the Galois group), which
+        are compared against the discriminant completeness bounds self._maxD and self._r2G.
+        Otherwise, we fall back on the classification bounds in self._maxReg.
+
+        Returns the discriminant range D, narrowed using the regulator when every remaining
+        signature has an explicit bound (so that later Galois/ramification checks benefit).
+
+        INPUT:
+
+        - ``galt`` -- the set of possible t (for Galois groups nTt), or None if unknown
+        """
+        R = reg.rset.sup()
+        all_t = set(range(1, self._num_trans[n] + 1)) if n < len(self._num_trans) else None
+        narrow = []
+        for r2 in list(r2opts):
+            bounds = self.reg_disc_bounds(n, r2, R)
+            if bounds is None:
+                maxReg = None
+                if n < len(self._maxReg) and self._maxReg[n] is not None and r2 < len(self._maxReg[n]):
+                    maxReg = self._maxReg[n][r2]
+                # The bound is only valid for regulators strictly less than maxReg.
+                if maxReg is not None and R < maxReg:
                     r2opts.remove(r2)
-                    reasons.add((n, r2, None, None, None, None, None, maxReg))
-                m = min(m, M)
-            if m is not infinity:
-                R = R.intersection(bottom(m))
-        return R
+                    reasons.add((n, r2, None, None, None, None, None, R))
+                else:
+                    narrow.append(None)
+                continue
+            narrow.append(max(M for _, M in bounds))
+            maxD = self._maxD[n][r2] if 2 <= n < len(self._maxD) else None
+            new_reasons = []
+            for ts, M in bounds:
+                # The Galois groups this bound applies to, intersected with those allowed by the query
+                if ts is None:
+                    tset = galt
+                else:
+                    tset = set(ts) if galt is None else galt.intersection(ts)
+                if tset is not None and not tset:
+                    continue  # no allowed Galois groups for this bound
+                DM = D.intersection(top(M))
+                if maxD is not None and DM.bounded(maxD):
+                    # If the query restricts the Galois group, the reason must say so,
+                    # since other Galois groups may have been skipped above.
+                    shown = None if (galt is None or galt == all_t) else tuple(sorted(tset))
+                    new_reasons.append((n, r2, shown, None, None, None, None, R))
+                    continue
+                # Otherwise try Galois-group dependent discriminant bounds
+                if tset is None:
+                    break
+                for t in tset:
+                    if not any(r2_ == r2 and t in Gs and (Mg is None or DM.bounded(Mg))
+                               for (r2_, Gs, Mg) in self._r2G.get(n, [])):
+                        break
+                else:
+                    new_reasons.append((n, r2, tuple(sorted(tset)), None, None, None, None, R))
+                    continue
+                break
+            else:
+                r2opts.remove(r2)
+                if galt is None or galt == all_t:
+                    # Every Galois group is covered, so a single reason suffices
+                    new_reasons = [(n, r2, None, None, None, None, None, R)]
+                reasons.update(new_reasons)
+                narrow.pop()
+        if r2opts and all(M is not None for M in narrow):
+            D = D.intersection(top(max(narrow)))
+        return D
 
     def clear_r2G(self, n, D, r2opts, galt, reasons):
         """
@@ -2351,7 +2531,7 @@ class NFBound(ColTest):
             raise ValueError
 
         if pos_constraints:
-            galt = pos_constraints[0]
+            galt = set(pos_constraints[0])  # copy: these may be shared tables like self._ab[n]
             for Gs in pos_constraints[1:]:
                 galt.intersection_update(Gs)
         else:
@@ -2540,7 +2720,7 @@ class NFBound(ColTest):
                 reasons.add("signature [0,1], class group of exponent 2")
                 return True, "depends on GRH"
 
-        if n > 2 and any(col in query for col in ["class_group", "class_number", "narrow_class_group", "narrow_class_number"]):
+        if n > 2 and any(col in query for col in ["class_group", "class_number", "narrow_class_group", "narrow_class_number", "regulator"]):
             caveat = "depends on GRH"
         else:
             caveat = None
@@ -2564,7 +2744,10 @@ class NFBound(ColTest):
             if not r2opts:
                 return True, caveat
         if reg.restricted():
-            reg = self.clear_regulator(n, reg, r2opts, reasons)
+            if not reg:
+                reasons.add("incompatible conditions: regulator")
+                return True, None
+            D = self.clear_regulator(n, D, reg, r2opts, self._query_galt(n, query), reasons)
             if not r2opts:
                 return True, caveat
 
@@ -3013,7 +3196,7 @@ CompletenessChecker("belyi_galmaps", [("deg", Bound(6), "Belyi maps of degree at
 # The precheck recognizes intrinsically impossible rd/grd ranges before the null-count
 # machinery issues its (potentially expensive) database queries.
 nf_bound = NFBound()
-CompletenessChecker("nf_fields", [((), nf_bound)], precheck=nf_bound.precheck)
+CompletenessChecker("nf_fields", [((), nf_bound)], precheck=nf_bound.precheck, implied=nf_bound.implied)
 
 
 CompletenessChecker("lf_fields", [(("n", "p"), Bound(23, 199), "p-adic fields of degree at most 23 and residue characteristic at most 199")], fill=[MulFiller("n", "e", "f")])
