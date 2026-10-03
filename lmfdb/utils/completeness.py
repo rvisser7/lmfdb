@@ -1186,6 +1186,45 @@ def hmf_bounds(db):
     return {label: D["max"] for (label, D) in db.hmf_forms.stats.numstats("level_norm", "field_label").items()}
 
 
+# Every totally real field of degree n with discriminant at most HMF_ALL_FIELDS_DISC[n]
+# has Hilbert modular form data.  Next missing discriminants:
+# 2: 253 (also missing 257, 264, 309, 312; everything else up to 497 is present)
+# 3: 2021, 4: 20032, 5: 202817, 6: 2115281
+HMF_ALL_FIELDS_DISC = {2: 252, 3: 2020, 4: 20031, 5: 202816, 6: 2115280}
+
+
+@cached_function
+def ecnf_totally_real_bound(db, field_label):
+    """
+    Return B such that the LMFDB contains every modular elliptic curve over the totally real
+    field ``field_label`` with conductor norm at most B, or None if there is no Hilbert
+    modular form data over this field.
+
+    Elliptic curves over totally real fields were found from rational Hilbert newforms
+    (see the ECNF source knowl), so their coverage is that of the HMF data over the field,
+    except where no curve is in the database for a rational newform (e.g. because the curve
+    search failed, or the newform is attached to a QM abelian surface rather than an
+    elliptic curve).  We therefore stop just below the smallest level norm of such a newform.
+    This replaces a uniform bound (all real quadratic fields of discriminant up to 497 and
+    conductor norm up to 5000), which was wrong for some fields: see issue #7196.
+
+    An elliptic curve isogeny class and its newform share a label, e.g. 2.2.5.1-31.1-a.
+    """
+    hmf_max = hmf_bounds(db).get(field_label)
+    if hmf_max is None:
+        return None
+    have = {f"{field_label}-{rec['conductor_label']}-{rec['iso_label']}"
+            for rec in db.ec_nfcurves.search({"field_label": field_label, "number": 1},
+                                             ["conductor_label", "iso_label"])}
+    for rec in db.hmf_forms.search({"field_label": field_label, "dimension": 1},
+                                   ["label", "level_norm"], sort=["level_norm"]):
+        if rec["level_norm"] > hmf_max:
+            break
+        if rec["label"] not in have:
+            return rec["level_norm"] - 1
+    return hmf_max
+
+
 class HMFBound(ColTest):
     def __call__(self, db, query):
         bounds = hmf_bounds(db)
@@ -1216,7 +1255,7 @@ class HMFBound(ColTest):
         # 4: everything up to disc 19821 (next 20032)
         # 5: everything up to disc 195829 (next 202817)
         # 6: everything up to disc 1997632 (next 2115281)
-        by_deg = {2: 252, 3: 2020, 4: 20031, 5: 202816, 6: 2115280}
+        by_deg = HMF_ALL_FIELDS_DISC
         if query.get("disc") is not None and query.get("deg") is not None:
             disc = IntegerSet(query["disc"])
             deg = IntegerSet(query["deg"])
@@ -1256,7 +1295,7 @@ class BianchiBound(ColTest):
             n, r = sig
             D = IntegerSet(query.get("abs_disc")).intersection(bottom(3))
             N = IntegerSet(query["conductor_norm"])
-            caveat = "Only modular elliptic curves are included"
+            caveat = "only covers modular elliptic curves"
 
             def reason(n, r, D, M):
                 if isinstance(D, int):
@@ -1319,19 +1358,41 @@ class BianchiBound(ColTest):
                 return False, None, None
             return True, reason(n, r, D, M), caveat
         if r == n: # totally real, EC
-            if n == 2:
-                return D.bounded(497) and N.bounded(5000), reason(2, 2, 497, 5000), None
-            if n == 3:
-                return D.bounded(1957) and N.bounded(2059), reason(3, 3, 1957, 2059), None
-            if n == 4:
-                return D.bounded(19821) and N.bounded(4091), reason(4, 4, 19821, 4091), None
-            if n == 5:
-                return D.bounded(195829) and N.bounded(1013), reason(5, 5, 195829, 1013), None
-            if n == 6:
-                return D.bounded(1997632) and N.bounded(961), reason(6, 6, 1997632, 961), None
+            return self.totally_real(db, query, n, D, N)
         if n == 3 and r == 1: # mixed case, EC
-            return D.bounded(30) and N.bounded(20000), reason(3, 1, 23, 20000), None
+            return D.bounded(30) and N.bounded(20000), reason(3, 1, 23, 20000), caveat
         return False, None, None
+
+    def totally_real(self, db, query, n, D, N):
+        """
+        Completeness for elliptic curves over totally real fields, using per-field
+        bounds derived from the Hilbert modular form data (see ``ecnf_totally_real_bound``).
+        """
+        label = query.get("field_label")
+        if isinstance(label, str):
+            fields = [label]
+        elif label is None and n in HMF_ALL_FIELDS_DISC and D.bounded(HMF_ALL_FIELDS_DISC[n]):
+            # All totally real fields of degree n with discriminant in D have HMF data
+            fields = [lab for lab in hmf_bounds(db)
+                      if lab.split(".")[:2] == [str(n), str(n)] and D.rset.contains(int(lab.split(".")[2]))]
+        else:
+            return False, None, None
+        if not fields:
+            return True, f"elliptic curves over totally real fields of degree {n} satisfying the query (there are no such fields)", None
+        bounds = [ecnf_totally_real_bound(db, lab) for lab in fields]
+        if any(B is None for B in bounds):
+            return False, None, None
+        B = min(bounds)
+        if not N.bounded(B):
+            return False, None, None
+        if len(fields) == 1:
+            reason = f"elliptic curves over {fields[0]} with conductor norm at most {B}"
+        else:
+            reason = f"elliptic curves with conductor norm at most {B} over totally real fields of degree {n} with discriminant at most {D.max()}"
+        # Modularity of all elliptic curves is known over real quadratic and totally real cubic
+        # fields, and over totally real quartic fields not containing sqrt(5), but not in general.
+        caveat = None if n <= 3 else f"depends on the modularity of all elliptic curves over these degree {n} fields"
+        return True, reason, caveat
 
 
 #### Number fields ####
