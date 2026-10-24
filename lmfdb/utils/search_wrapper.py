@@ -216,8 +216,11 @@ class Wrapper:
             errpage = self.f(info, query)
             parse_labels(info, query, self.table)
         except Exception as err:
-            # Errors raised in parsing; these should mostly be SearchParsingErrors
-            if is_debug_mode():
+            # Errors raised in parsing.  A SearchParsingError reports invalid
+            # user input rather than a bug, so we redisplay the search page with
+            # the error message even in debug mode; anything else is re-raised
+            # so that developers see the traceback.
+            if is_debug_mode() and not isinstance(err, SearchParsingError):
                 raise
             info["err"] = str(err)
             err_title = query.pop("__err_title__", self.err_title)
@@ -238,7 +241,7 @@ class Wrapper:
             one_per = [one_per]
         return query, sort, table, title, err_title, template, one_per
 
-    def query_cancelled_error(
+    def query_canceled_error(
         self, info, query, err, err_title, template, template_kwds
     ):
         ctx = ctx_proc_userdata()
@@ -362,6 +365,7 @@ class SearchWrapper(Wrapper):
         if random:
             query.pop("__projection__", None)
         proj = query.pop("__projection__", self.projection)
+        complete = query.pop("__complete__", None) # Some query builders make simplifications based on the LMFDB's limits; they should add __complete__=False when they do
         # It's fairly common to add virtual columns in postprocessing that are then used in MultiProcessedCols.
         # These virtual columns won't be present in the database, so we just strip them out
         # We have to do this here since we didn't have access to the table in __init__
@@ -421,7 +425,7 @@ class SearchWrapper(Wrapper):
                     split_ors=split_ors,
                 )
         except QueryCanceledError as err:
-            return self.query_cancelled_error(
+            return self.query_canceled_error(
                 info, query, err, err_title, template, template_kwds
             )
         except SearchParsingError as err:
@@ -453,9 +457,18 @@ class SearchWrapper(Wrapper):
             info["results"] = res
             # Display warning message if user searched on column(s) with null values
             if query:
-                nulls = table.stats.null_counts()
                 try:
-                    complete, msg, caveat = results_complete(table.search_table, query, table._db, info.get("search_array"))
+                    nulls = table.stats.null_counts()
+                    if complete is None:
+                        complete, msg, caveat = results_complete(table.search_table, query, table._db, info.get("search_array"))
+                    elif isinstance(complete, tuple) and len(complete) == 2:
+                        msg, caveat = complete
+                        complete = True
+                    elif complete is False:
+                        # msg is not used below, but caveat is
+                        caveat = False
+                    else:
+                        raise ValueError("__complete__ key invalid")
                     if complete:
                         flash_success("The results below are complete, since the LMFDB contains all " + msg)
                     elif nulls: # TODO: We already run a version of this inside results_complete.  Should be combined
@@ -487,10 +500,15 @@ class SearchWrapper(Wrapper):
                         flash_info("The completeness " + caveat)
                 except Exception as err:
                     import traceback
-                    msg = f"There was an error in the completeness checking code, so the search results below may or may not be complete: \n{err}"
-                    flash_info(msg)
-                    msg += "\n" + traceback.format_exc()
-                    app.logger.warning(msg)
+                    # ``results_complete`` no longer raises, but the null-count display above
+                    # also queries the database, so we keep this net.  Note that the error is
+                    # passed as an argument rather than interpolated: flash_info applies %
+                    # formatting to its first argument, so a % in the error text would raise
+                    # from inside this handler and produce the very 500 we are avoiding.
+                    flash_info("There was an error in the completeness checking code, so the search results below may or may not be complete: %s", err)
+                    app.logger.warning(
+                        "There was an error in the completeness checking code: %s\n%s",
+                        err, traceback.format_exc())
             return render_template(template, info=info, title=title, **template_kwds)
 
     def _diagram_search(self, info):
@@ -611,6 +629,7 @@ class SearchWrapper(Wrapper):
         if not isinstance(data, tuple):
             return data
         query, sort, table, title, err_title, template, one_per = data
+        query.pop("__complete__", None) # Some query builders make simplifications based on the LMFDB's limits; they should add __complete__=False when they do
 
         # Use diagram template instead of default
         template = diagram_template
@@ -639,7 +658,7 @@ class SearchWrapper(Wrapper):
                 one_per=one_per,
             )
         except QueryCanceledError as err:
-            return self.query_cancelled_error(
+            return self.query_canceled_error(
                 info, query, err, err_title, template, template_kwds
             )
         except SearchParsingError as err:
@@ -765,6 +784,7 @@ class CountWrapper(Wrapper):
             return data  # error page
         query, sort, table, title, err_title, template, one_per = data
         groupby = query.pop("__groupby__", self.groupby)
+        query.pop("__complete__", None) # Some query builders make simplifications based on the LMFDB's limits; they should add __complete__=False when they do
         template_kwds = {key: info.get(key, val()) for key, val in self.kwds.items()}
         try:
             if query:
@@ -779,7 +799,7 @@ class CountWrapper(Wrapper):
                         tuple(key[i] for i in perm): val for (key, val) in res.items()
                     }
         except QueryCanceledError as err:
-            return self.query_cancelled_error(
+            return self.query_canceled_error(
                 info, query, err, err_title, template, template_kwds
             )
         else:
@@ -843,6 +863,7 @@ class EmbedWrapper(Wrapper):
             return data
         query, sort, table, title, err_title, template, one_per = data
         proj = query.pop("__projection__", self.projection)
+        query.pop("__complete__", None) # Some query builders make simplifications based on the LMFDB's limits; they should add __complete__=False when they do
         if isinstance(proj, list):
             proj = [col for col in proj if col in table.search_cols]
         if "result_count" in info:
@@ -864,7 +885,7 @@ class EmbedWrapper(Wrapper):
                 one_per=one_per,
             )
         except QueryCanceledError as err:
-            return self.query_cancelled_error(
+            return self.query_canceled_error(
                 info, query, err, err_title, template, template_kwds
             )
         except SearchParsingError as err:
@@ -929,6 +950,7 @@ class YieldWrapper(Wrapper):
         if not isinstance(data, tuple):
             return data
         query, sort, yielder, title, err_title, template, one_per = data
+        query.pop("__complete__", None) # Some query builders make simplifications based on the LMFDB's limits; they should add __complete__=False when they do
         if "result_count" in info:
             if one_per:
                 nres = yielder(query, one_per=one_per, count=True)
