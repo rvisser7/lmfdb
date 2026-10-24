@@ -534,9 +534,31 @@ class Lfunction_from_db(Lfunction):
         return instance['Lhash']
 
     @lazy_attribute
+    def origin_instances(self):
+        # rows of lfunc_instances for the objects giving rise to this L-function
+        return get_instances_by_label(self.label)
+
+    @lazy_attribute
     def origins(self):
         # objects that arise the same identical L-function
-        return names_and_urls(get_instances_by_label(self.label))
+        return names_and_urls(self.origin_instances)
+
+    @lazy_attribute
+    def code(self):
+        """
+        Code snippets constructing this L-function from one of its origins,
+        or None if no origin is supported (see LfunctionCode.py).
+        """
+        from .LfunctionCode import lfunction_code
+        try:
+            return lfunction_code(self.label, self.origin_instances,
+                                  self.motivic_weight, self.order_of_vanishing)
+        except Exception as err:
+            # snippets should never prevent the L-function page from rendering
+            if is_debug_mode():
+                raise
+            logger.warning("Could not create code snippets for L-function %s: %s", self.label, err)
+            return None
 
     @property
     def friends(self):
@@ -574,9 +596,17 @@ class Lfunction_from_db(Lfunction):
 
     @lazy_attribute
     def downloads(self):
-        return [['Euler factors to text', self.download_euler_factors_url],
-                ['Zeros to text', self.download_zeros_url],
-                ['Dirichlet coefficients to text', self.download_dirichlet_coeff_url]]
+        downloads = [['Euler factors to text', self.download_euler_factors_url],
+                     ['Zeros to text', self.download_zeros_url],
+                     ['Dirichlet coefficients to text', self.download_dirichlet_coeff_url]]
+        if self.code:
+            names = {'magma': 'Magma', 'pari': 'PariGP', 'sage': 'SageMath'}
+            for lang in sorted(self.code['prompt']):
+                download_type = 'gp' if lang == 'pari' else lang
+                downloads.append([f'{names[lang]} commands',
+                                  url_for('.lfunction_code_download', label=self.label,
+                                          download_type=download_type)])
+        return downloads
 
     @lazy_attribute
     def download_euler_factors_url(self):

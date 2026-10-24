@@ -50,7 +50,7 @@ from lmfdb.utils import (
     to_dict, signtocolour, rgbtohex, key_for_numerically_sort, display_float,
     prop_int_pretty, round_to_half_int, display_complex, bigint_knowl,
     search_wrap, list_to_factored_poly_otherorder, flash_error,
-    parse_primes, coeff_to_poly, Downloader,
+    parse_primes, coeff_to_poly, Downloader, CodeSnippet,
     SearchArray, TextBox, SelectBox, YesNoBox, CountBox,
     SubsetBox, TextBoxWithSelect, RowSpacer, redirect_no_cache)
 from lmfdb.utils.interesting import interesting_knowls
@@ -1243,6 +1243,9 @@ def initLfunction(L, args, request):
     (info['zeroslink'], info['plotlink']) = set_zeroslink_and_plotlink(L, args)
     # info['navi']= set_navi(L)
 
+    # code snippets, built from one of the origins of the L-function
+    info['code'] = L.code if isinstance(L, Lfunction_from_db) else None
+
     return info
 
 
@@ -1611,6 +1614,27 @@ def download_dirichlet_coeff(label, L=None): # the wrapper populates the L
 def download(label, L=None): # the wrapper populates the L
     assert label
     return L.download()
+
+@l_function_page.route("/download_code/<label>/<download_type>")
+def lfunction_code_download(label, download_type):
+    """
+    Download the code snippets for the L-function with the given label,
+    in the language download_type ('magma', 'gp' or 'sage').
+    """
+    from .LfunctionCode import sorted_code_names
+    lang = 'pari' if download_type == 'gp' else download_type
+    if not LFUNC_LABEL_RE.fullmatch(label):
+        return abort(404, f"Invalid label {label}")
+    if not db.lfunc_lfunctions.exists({'label': label}):
+        return abort(404, f"There is no L-function in the database with label {label}")
+    code = Lfunction_from_db(label=label).code
+    if code is None:
+        return abort(404, f"No code snippets are available for L-function {label}")
+    if lang not in code['prompt']:
+        return abort(404, f"No {download_type} code snippets are available for L-function {label}")
+    response = make_response(CodeSnippet(code).export_code(label, lang, sorted_code_names))
+    response.headers['Content-type'] = 'text/plain'
+    return response
 
 @l_function_page.route("/data/<label>")
 def lfunc_data(label):

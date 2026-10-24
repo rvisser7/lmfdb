@@ -1,0 +1,230 @@
+# Code snippets for L-functions.
+#
+# An L-function is constructed from one of its origins (an elliptic curve,
+# genus 2 curve, Dirichlet character, ...), see lmfdb/lfunctions/LfunctionCode.py.
+# The snippet defining the L-function is taken from the matching entry in
+# 'origins' below.  Every origin defines L (and, in Sage, the underlying
+# Pari Ldata structure Ldata), so the remaining snippets apply to all origins.
+#
+# An origin may override a generic snippet for some language (e.g. the analytic
+# rank in Magma for elliptic curves), or remove it by setting it to null.
+#
+# Placeholders in {braces} are filled in by LfunctionCode.py; {lang} and {label}
+# in the frontmatter are filled in by CodeSnippet.
+
+prompt:
+  sage:   'sage'
+  pari:   'gp'
+  magma:  'magma'
+
+frontmatter:
+  all: |
+    {lang} code for working with L-function {label}
+  rest: |
+    The L-function is constructed from {origin}.
+    All computations use the arithmetic normalization, in which the central point is s = {center}.
+    (Note that some of these functions may take a long time to execute.)
+
+evaluate:
+  comment: Evaluate the L-function at a point on the critical line
+  sage:  L({center} + I)
+  pari:  lfun(L, {center} + I)
+  magma: |
+    CC<i> := ComplexField();
+    Evaluate(L, {center} + i);
+
+dirichlet_coeffs:
+  comment: First 20 Dirichlet coefficients
+  sage:  pari.lfunan(Ldata, 20)
+  pari:  lfunan(L, 20)
+  magma: LGetCoefficients(L, 20);
+
+functional_equation:
+  comment: Numerically check the functional equation (the output should be close to 0)
+  sage:  L.check_functional_equation()
+  pari:  2.^lfuncheckfeq(L)
+  magma: CFENew(L);
+
+conductor:
+  comment: Conductor
+  sage:  L.conductor
+  pari:  lfunparams(L)[1]
+  magma: Conductor(L);
+
+sign:
+  comment: Sign of the functional equation
+  sage:  pari.lfunrootres(Ldata)[2]
+  pari:  lfunrootres(L)[3]
+  magma: Sign(L);
+
+rank:
+  comment: Analytic rank (order of vanishing at the central point)
+  sage:  pari.lfunorderzero(Ldata)
+  pari:  lfunorderzero(L)
+
+special_value:
+  comment: Value at the central point
+  sage:  L({center})
+  pari:  lfun(L, {center})
+  magma: Evaluate(L, {center});
+
+special_value_derivative:
+  comment: Leading Taylor coefficient at the central point (where L vanishes to order {rank})
+  sage:  L.derivative({center}, {rank}){sage_factorial}
+  pari:  lfun(L, {center}, {rank}){pari_factorial}
+  magma: |
+    Evaluate(L, {center} : Derivative := {rank}){magma_factorial};
+
+euler_factor:
+  comment: Euler factor at p = 2
+  sage:  pari.lfuneuler(Ldata, 2)
+  pari:  lfuneuler(L, 2)
+  magma: EulerFactor(L, 2);
+
+zeros:
+  comment: Imaginary parts of the zeros on the critical line with 0 <= t <= 10
+  sage:  L.zeros(10)
+  pari:  lfunzeros(L, 10)
+
+plot:
+  comment: Plot the Z-function along the critical line
+  sage:  plot(L.hardy, -10, 10)
+  pari:  ploth(t = -10, 10, lfunhardy(L, t))
+
+origins:
+  # Elliptic curve over Q (isogeny class)
+  EllipticCurveQ:
+    description: the elliptic curve isogeny class {origin_label}
+    lfunction:
+      comment: Define the L-function
+      sage: |
+        from sage.lfunctions.pari import lfun_elliptic_curve, LFunction
+        E = EllipticCurve({ainvs})
+        Ldata = lfun_elliptic_curve(E)
+        L = LFunction(Ldata)
+      pari: |
+        E = ellinit({ainvs});
+        L = lfuncreate(E);
+      magma: |
+        E := EllipticCurve({ainvs});
+        L := LSeries(E);
+    rank:
+      magma: AnalyticRank(E);
+
+  # Elliptic curve over a number field (isogeny class)
+  EllipticCurveNF:
+    description: the elliptic curve isogeny class {origin_label}
+    lfunction:
+      comment: Define the L-function
+      sage: |
+        from sage.lfunctions.pari import lfun_elliptic_curve, LFunction
+        R.<x> = PolynomialRing(QQ); K.<a> = NumberField(R({field_coeffs}))
+        E = EllipticCurve({sage_ainvs})
+        Ldata = lfun_elliptic_curve(E)
+        L = LFunction(Ldata)
+      pari: |
+        K = nfinit(Polrev({field_coeffs}));
+        E = ellinit({pari_ainvs}, K);
+        L = lfuncreate(E);
+      magma: |
+        R<x> := PolynomialRing(Rationals()); K<a> := NumberField(R!{field_coeffs});
+        E := EllipticCurve({magma_ainvs});
+        L := LSeries(E);
+
+  # Genus 2 curve over Q (isogeny class), given by its minimal equation y^2 + h(x)y = f(x)
+  Genus2CurveQ:
+    description: the genus 2 curve isogeny class {origin_label}
+    lfunction:
+      comment: Define the L-function
+      sage: |
+        from sage.lfunctions.pari import lfun_genus2, LFunction
+        R.<x> = PolynomialRing(QQ)
+        C = HyperellipticCurve(R({f}), R({h}))
+        Ldata = lfun_genus2(C){sage_fix2}
+        L = LFunction(Ldata)
+      pari: |
+        L = lfungenus2([Pol(Vecrev({f})), Pol(Vecrev({h}))]);{pari_fix2}
+      magma: |
+        R<x> := PolynomialRing(Rationals());
+        C := HyperellipticCurve(R!{f}, R!{h});
+        L := LSeries(C{magma_cond_option});
+
+  # Primitive Dirichlet character, given by its Conrey label
+  Dirichlet:
+    description: the Dirichlet character {origin_label}
+    lfunction:
+      comment: Define the L-function
+      sage: |
+        from sage.lfunctions.pari import LFunction
+        Ldata = pari.lfuncreate(Mod({number}, {modulus}))  # Mod(n, q) is the character with Conrey label q.n
+        L = LFunction(Ldata)
+      pari: |
+        L = lfuncreate(Mod({number}, {modulus})); \\ Mod(n, q) is the character with Conrey label q.n
+      magma: |
+        // Please install CHIMP (https://github.com/edgarcosta/CHIMP) if you want to run this code
+        chi := DirichletCharacter("{modulus}.{number}");
+        L := LSeries(chi);
+
+  # Dedekind zeta function of a number field
+  NumberField:
+    description: the number field {origin_label} (Dedekind zeta function)
+    lfunction:
+      comment: Define the L-function
+      sage: |
+        from sage.lfunctions.pari import lfun_number_field, LFunction
+        x = polygen(QQ); K.<a> = NumberField({poly})
+        Ldata = lfun_number_field(K)
+        L = LFunction(Ldata)
+      pari: |
+        L = lfuncreate({poly});
+      magma: |
+        R<x> := PolynomialRing(Rationals()); K<a> := NumberField({poly});
+        L := LSeries(K);
+
+  # Classical modular form with rational coefficients (dimension 1).
+  # The newform is identified among the eigenforms of the newspace by its first
+  # {nterms} coefficients, which distinguish it from the other newforms in the space.
+  ClassicalModularForm:
+    description: the classical modular form {origin_label}
+    lfunction:
+      comment: Define the L-function
+      sage: |
+        from sage.lfunctions.pari import LFunction
+        mf = pari.mfinit([{level}, {weight}, Mod({conrey_index}, {level})], 0)
+        F = next(f for f in mf.mfeigenbasis() if pari.mfcoefs(f, {nterms})[1:] == {an})
+        Ldata = pari.lfunmf(mf, F)
+        L = LFunction(Ldata)
+      pari: |
+        mf = mfinit([{level}, {weight}, Mod({conrey_index}, {level})], 0);
+        [F] = [f | f <- mfeigenbasis(mf), mfcoefs(f, {nterms})[^1] == {an}];
+        L = lfunmf(mf, F);
+      magma: |
+        {magma_space}
+        f := [F[1] : F in Newforms(S) | [Coefficient(F[1], n) : n in [1..{nterms}]] eq {an}][1];
+        L := LSeries(f);
+    # The L-functions of modular forms are given by their Dirichlet coefficients,
+    # without local factors (lfuneuler fails in Pari)
+    euler_factor:
+      sage: null
+      pari: null
+      magma: null
+
+snippet_test:
+  test_ec_11a:
+    label: 2-11-1.1-c1-0-0
+    url: L/download_code/2-11-1.1-c1-0-0/{lang}
+  test_ec_37a:
+    label: 2-37-1.1-c1-0-0
+    url: L/download_code/2-37-1.1-c1-0-0/{lang}
+  test_g2c_169a:
+    label: 4-13e2-1.1-c1e2-0-0
+    url: L/download_code/4-13e2-1.1-c1e2-0-0/{lang}
+  test_riemann_zeta:
+    label: 1-1-1.1-r0-0-0
+    url: L/download_code/1-1-1.1-r0-0-0/{lang}
+  test_dedekind_zeta_5:
+    label: 2-5-1.1-r0e2-0-0
+    url: L/download_code/2-5-1.1-r0e2-0-0/{lang}
+  test_cmf_delta:
+    label: 2-1-1.1-c11-0-0
+    url: L/download_code/2-1-1.1-c11-0-0/{lang}

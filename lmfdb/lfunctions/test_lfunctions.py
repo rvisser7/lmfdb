@@ -29,6 +29,42 @@ class LfunctionTest(LmfdbTest):
         # bogus a_101 (unknown Euler factor would default to 1), the download stops at a_100.
         assert len(an) == 100
 
+    #------------------------------------------------------
+    # Code snippets, constructed from the origin of the L-function
+    #------------------------------------------------------
+
+    def test_code_snippets_page(self):
+        page = self.tc.get('/L/2/11/1.1/c1/0/0').get_data(as_text=True)
+        assert 'Show commands' in page
+        assert 'lfuncreate(E)' in page
+        assert 'EllipticCurve([0, -1, 1, -10, -20])' in page
+        assert 'SageMath commands' in page  # download link in the sidebar
+
+    def test_code_snippets_download(self):
+        # elliptic curve over Q, analytic rank 1
+        body = self.tc.get('/L/download_code/2-37-1.1-c1-0-0/gp').get_data(as_text=True)
+        assert 'E = ellinit([0, 0, 1, -1, 0]);' in body
+        assert 'lfun(L, 1, 1)' in body
+        body = self.tc.get('/L/download_code/2-37-1.1-c1-0-0/magma').get_data(as_text=True)
+        assert 'AnalyticRank(E);' in body
+        # genus 2 curve
+        body = self.tc.get('/L/download_code/4-13e2-1.1-c1e2-0-0/sage').get_data(as_text=True)
+        assert 'lfun_genus2(C)' in body
+        # Dirichlet character
+        body = self.tc.get('/L/download_code/1-19-19.9-r0-0-0/gp').get_data(as_text=True)
+        assert 'lfuncreate(Mod(9, 19))' in body
+        # Dedekind zeta function
+        body = self.tc.get('/L/download_code/2-5-1.1-r0e2-0-0/gp').get_data(as_text=True)
+        assert 'lfuncreate(x^2 - x - 1)' in body
+        # classical modular form (Ramanujan's Delta)
+        body = self.tc.get('/L/download_code/2-1-1.1-c11-0-0/gp').get_data(as_text=True)
+        assert 'mfinit([1, 12, Mod(1, 1)], 0)' in body
+        assert 'lfun(L, 6)' in body
+
+    def test_code_snippets_download_errors(self):
+        assert self.tc.get('/L/download_code/not-a-label/gp').status_code == 404
+        assert self.tc.get('/L/download_code/2-11-1.1-c1-0-0/fortran').status_code == 404
+
     def test_LDirichlet(self):
         L = self.tc.get('/L/Character/Dirichlet/19/9/', follow_redirects=True)
         assert '0.4813597783' in L.get_data(as_text=True)

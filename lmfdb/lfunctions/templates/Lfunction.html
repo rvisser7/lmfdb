@@ -53,6 +53,10 @@
 <h2>{{ KNOWL_INC(KNOWL_ID+'.top',title='') }}</h2>
 {% endif %}
 
+{% if code %}
+<p>{{ place_code('lfunction', is_top_snippet=True) }}{{ place_code('evaluate') }}</p>
+{% endif %}
+
 <h2 style="margin-top:5px;"> {{ KNOWL('lfunction.dirichlet_series', title='Dirichlet series') }}</h2>
 {% if dirichlet_arithmetic -%}
 <div class="arithmetic" style="margin-left:10px;">{{ dirichlet_arithmetic|safe }}</div>
@@ -60,6 +64,7 @@
 {% else %}
 <div style="margin-left:10px;">{{ dirichlet|safe }}</div>
 {% endif %}
+{{ place_code('dirichlet_coeffs') }}
 
 <h2 style="margin-bottom:-10px;">{{ KNOWL('lfunction.functional_equation',title='Functional equation') }}</h2>
 {% if dirichlet_arithmetic -%}
@@ -67,6 +72,9 @@
 <div id="functionalEqText" class="analytic nodisplay">\[{{ functionalequation }}\]</div>
 {% else %}
 <div id="functionalEqText">\[{{ functionalequation }}\]</div>
+{% endif %}
+{% if code and code.functional_equation %}
+<div style="margin-top:-15px; margin-bottom:30px;">{{ place_code('functional_equation') }}</div>
 {% endif %}
 
 <h2 style="margin-top:-25px;"> {{ KNOWL('lfunction.invariants', title='Invariants') }}  </h2>
@@ -84,12 +92,14 @@
       &nbsp;&nbsp;  = &nbsp;&nbsp; \({{ conductor_factored }}\)
       {% endif %}
     </td>
+    <td>{{ place_code('conductor') }}</td>
   </tr>
 
   <tr>
     <td> {{ KNOWL('lfunction.sign', title="Sign") }}: </td>
     <td> {{ sign }}
     </td>
+    <td>{{ place_code('sign') }}</td>
   </tr>
 
   {% if analytic_conductor %}
@@ -153,6 +163,7 @@
     <td> {{ KNOWL('lfunction.analytic_rank', title="Analytic rank") }}: </td>
     <td> \({{ rank }}\)
     </td>
+    <td>{{ place_code('rank') }}</td>
   </tr>
   {% endif %}
 
@@ -234,6 +245,9 @@
   {% endif %}
   </p>
 {% endif %}
+{% if dirichlet_arithmetic or algebraic %}
+{{ place_code('special_value') }}
+{% endif %}
 
 <h2>{{ KNOWL('lfunction.euler_product', title='Euler product') }}</h2>
 {% if dirichlet_arithmetic -%}
@@ -242,6 +256,7 @@
 {% else %}
   <div>{{ eulerproduct }}</div>
 {% endif %}
+{{ place_code('euler_factor') }}
 
 {% if factorization is defined %}
 <h2>Factorization</h2>
@@ -264,6 +279,7 @@
 <div>Zeros not available.</div>
 {% endif %}
 </p>
+{{ place_code('zeros') }}
 
 <h2> Graph of the {{ KNOWL('lfunction.zfunction', title='$Z$-function') }} along the {{ KNOWL('lfunction.critical_line', title='critical line') }} </h2>
 
@@ -276,6 +292,7 @@
 {% else %}
 <div>Plot not available.</div>
 {% endif %}
+{{ place_code('plot') }}
 
 {% if label %}
 <h2>{{ KNOWL_INC(KNOWL_ID+'.bottom',title='') }}</h2>
