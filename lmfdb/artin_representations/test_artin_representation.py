@@ -31,6 +31,17 @@ class ArtinRepTest(LmfdbTest):
         data = self.tc.get('/ArtinRepresentation/data/2.3806401.120.b').get_data(as_text=True)
         assert 'ArtinReps' in data and 'GalConjSigns' in data
 
+    def test_code_snippets(self):
+        page = self.tc.get('/ArtinRepresentation/2.47.5t2.a.a').get_data(as_text=True)
+        assert 'ArtinRepresentations(K)' in page
+        assert 'Magma commands' in page
+
+    def test_code_download(self):
+        code = self.tc.get('/ArtinRepresentation/2.47.5t2.a.b/download/magma').get_data(as_text=True)
+        assert 'Magma code for working with Artin representation 2.47.5t2.a.b' in code
+        assert 'ArtinRepresentations(K)' in code and 'LSeries(rho)' in code
+        assert self.tc.get('/ArtinRepresentation/2.47.5t2.a.b/download/foo').status_code == 404
+
     def test_proj(self):
         data = self.tc.get('/ArtinRepresentation/?projective_image=5T2').get_data(as_text=True)
         assert '2.47.5t2.a.a' in data

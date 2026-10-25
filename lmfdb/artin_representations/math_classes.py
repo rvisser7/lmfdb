@@ -2,13 +2,15 @@ from lmfdb import db
 from lmfdb.utils import (url_for,
     web_latex, coeff_to_poly, letters2num, num2letters, raw_typeset,
     raw_typeset_poly, pos_int_and_factor)
-from sage.all import PolynomialRing, QQ, ComplexField, exp, pi, Integer, valuation, CyclotomicField, RealField, log, I, factor, crt, euler_phi, primitive_root, mod, next_prime, PowerSeriesRing, ZZ
+from sage.all import PolynomialRing, QQ, ComplexField, exp, pi, Integer, valuation, CyclotomicField, RealField, log, I, factor, crt, euler_phi, primitive_root, mod, next_prime, PowerSeriesRing, ZZ, GF, lcm
 from lmfdb.groups.abstract.main import abstract_group_display_knowl
 from lmfdb.galois_groups.transitive_group import (
     transitive_group_display_knowl, group_display_short)
 from lmfdb.number_fields.web_number_field import WebNumberField, formatfield
 from lmfdb.characters.web_character import WebSmallDirichletCharacter
+import os
 import re
+import yaml
 
 
 # abbreviate labels with large conductors for display purposes
@@ -647,6 +649,110 @@ class ArtinRepresentation():
     def selfdual(self):
         return self.self_dual()
 
+    def snippet_frobenius_traces(self, min_primes=5, max_primes=300):
+        """
+        Choose primes at which the traces of Frobenius single out this
+        representation, for use in code snippets.
+
+        Returns ``(primes, traces, unique)``, where ``traces[i]`` is the trace
+        of Frob_p at ``p = primes[i]``, as a list of coefficients with respect
+        to powers of zeta_N (N = self.character_field(), zeta_N = exp(2 pi i/N)).
+        The primes avoid the discriminant of the defining polynomial and the
+        hard primes, and are taken in increasing order until (at least
+        ``min_primes`` have been used and) every other representation of the
+        same dimension attached to the same Artin field -- in particular every
+        Galois conjugate -- has a different trace at one of them.
+        ``unique`` is False if ``max_primes`` primes did not suffice.
+        """
+        nf = self.number_field_galois_group()
+        disc = PolynomialRing(ZZ, "x")([ZZ(c) for c in nf.polynomial()]).discriminant()
+        hard = set(self.hard_primes())
+        classes = nf.conjugacy_classes()
+        id_index = next(i for i, c in enumerate(classes) if int(c.order()) == 1)
+
+        my_N = int(self.character_field())
+        my_char = [[ZZ(c) for c in y] for y in self.character()]
+        me = (self.baselabel(), self.galorbindex())
+        others = [([[ZZ(c) for c in y] for y in z["Character"]], int(z["CharacterField"]))
+                  for z in nf.ArtinReps()
+                  if (str(z["Baselabel"]), int(z["GalConj"])) != me]
+        # Compare character values exactly, in a common cyclotomic field
+        M = lcm([my_N] + [N for _, N in others])
+        zeta = CyclotomicField(M).gen()
+
+        def value(coeffs, N):
+            return sum(c * zeta**(j * (M // N)) for j, c in enumerate(coeffs))
+
+        dim = value(my_char[id_index], my_N)
+        remaining = [(chi, N) for chi, N in others if value(chi[id_index], N) == dim]
+
+        primes, traces = [], []
+        p = ZZ(1)
+        while len(primes) < max_primes:
+            p = next_prime(p)
+            if disc % p == 0 or p in hard:
+                continue
+            # (trivial Galois group: there may be no Frobenius resolvent data)
+            j = 0 if len(classes) == 1 else nf.frobenius_class_index_cheap(p) - 1
+            primes.append(p)
+            traces.append(my_char[j])
+            mine = value(my_char[j], my_N)
+            remaining = [(chi, N) for chi, N in remaining if value(chi[j], N) == mine]
+            if not remaining and len(primes) >= min_primes:
+                break
+        return primes, traces, not remaining
+
+    def make_code_snippets(self):
+        """
+        Load code.yaml and fill in the snippet defining this representation.
+        Sets and returns self.code.
+        """
+        _curdir = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(_curdir, "code.yaml")) as codefile:
+            code = yaml.load(codefile, Loader=yaml.FullLoader)
+
+        poly = PolynomialRing(QQ, "x")(self.NFGal())
+        if poly.degree() <= 1:
+            field = "RationalsAsNumberField()"
+        else:
+            field = "NumberField(%s)" % poly
+
+        primes, traces, unique = self.snippet_frobenius_traces()
+        N = int(self.character_field())
+        Kz = CyclotomicField(N)
+        Pz = PolynomialRing(ZZ, "z")
+        trace_strs = []
+        uses_zeta = False
+        for coeffs in traces:
+            val = sum(c * Kz.gen()**j for j, c in enumerate(coeffs))
+            if val in QQ:
+                trace_strs.append(str(QQ(val)))
+            else:
+                # written in terms of z = exp(2*pi*i/N), matching the LMFDB convention
+                trace_strs.append(str(Pz(coeffs)))
+                uses_zeta = True
+        zeta_line = ""
+        if uses_zeta:
+            zeta_line = "C<i> := ComplexField(); z := Exp(2*Pi(C)*i/%s);" % N
+        if not unique:
+            zeta_line += "\n// Warning: these traces may not determine rho uniquely; check that the list below has length 1."
+
+        subs = {"field": field,
+                "zeta": zeta_line,
+                "primes": "[%s]" % ", ".join(str(p) for p in primes),
+                "traces": "[%s]" % ", ".join(trace_strs),
+                "dim": str(self.dimension())}
+        for lang in code["rep"]:
+            if lang == "comment":
+                continue
+            snippet = code["rep"][lang]
+            for key, val in subs.items():
+                snippet = snippet.replace("{%s}" % key, val)
+            # drop lines left empty by the substitutions
+            code["rep"][lang] = "\n".join(line for line in snippet.split("\n") if line.strip()) + "\n"
+        self.code = code
+        return code
+
 
 class CharacterValues(list):
     def display(self):
@@ -931,9 +1037,9 @@ class NumberFieldGaloisGroup():
         pol = X([str(m) for m in self.polynomial()])
         return pari("nfinit([%s,%s])" % (str(pol), self.all_hard_primes()))
 
-    def from_cycle_type_to_conjugacy_class_index(self, cycle_type, p):
+    def cycle_type_to_conjugacy_class_index_dict(self):
         try:
-            dict_to_use = self._from_cycle_type_to_conjugacy_class_index_dict
+            return self._from_cycle_type_to_conjugacy_class_index_dict
         except AttributeError:
             from . import cyc_alt_res_engine
             self._from_cycle_type_to_conjugacy_class_index_dict = cyc_alt_res_engine.from_cycle_type_to_conjugacy_class_index_dict([str(m) for m in self.polynomial()], self.Frobenius_resolvents())
@@ -943,7 +1049,28 @@ class NumberFieldGaloisGroup():
             # and only needs to know the defining polynomial of the number field and the frobenius resolvent
             # CAUTION: this is not meant to be used for hard primes, even though it would seemingly work
             # This is a consequence of Tim's definition of hard primes.
-            dict_to_use = self._from_cycle_type_to_conjugacy_class_index_dict
+            return self._from_cycle_type_to_conjugacy_class_index_dict
+
+    def frobenius_class_index_cheap(self, p):
+        """
+        Index (starting at 1) of the conjugacy class of Frobenius at p.
+
+        Unlike from_prime_to_conjugacy_class_index, this does not call nfinit
+        or all_bad_primes (which instantiate every Artin representation of the
+        field from the database); the cycle type is read off from the
+        factorisation of the defining polynomial mod p.  The caller must ensure
+        that p does not divide the discriminant of the defining polynomial and
+        is not a hard prime.
+        """
+        f = PolynomialRing(GF(p), "x")([ZZ(c) for c in self.polynomial()])
+        cycle_type = sorted(g.degree() for g, _ in f.factor())
+        for key, fn in self.cycle_type_to_conjugacy_class_index_dict().items():
+            if sorted(key) == cycle_type:
+                return fn(p)
+        raise KeyError("No conjugacy class with cycle type %s" % cycle_type)
+
+    def from_cycle_type_to_conjugacy_class_index(self, cycle_type, p):
+        dict_to_use = self.cycle_type_to_conjugacy_class_index_dict()
         try:
             fn_to_use = dict_to_use[cycle_type]
         except KeyError:

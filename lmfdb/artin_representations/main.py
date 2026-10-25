@@ -4,7 +4,7 @@
 import re
 import random
 
-from flask import render_template, request, url_for, redirect, abort
+from flask import render_template, request, url_for, redirect, abort, make_response
 from sage.all import ZZ, cached_function
 
 from lmfdb import db
@@ -13,7 +13,8 @@ from lmfdb.utils import (
     parse_ints, parse_container, parse_bool, clean_input, flash_error,
     SearchArray, TextBox, TextBoxNoEg, ParityBox, CountBox,
     SubsetNoExcludeBox, TextBoxWithSelect, SelectBoxNoEg, Downloader,
-    display_knowl, search_wrap, to_dict, comma, prop_int_pretty, redirect_no_cache)
+    display_knowl, search_wrap, to_dict, comma, prop_int_pretty, redirect_no_cache,
+    CodeSnippet)
 from lmfdb.utils.display_stats import StatsDisplay, totaler, proportioners, range_formatter
 from lmfdb.utils.interesting import interesting_knowls
 from lmfdb.utils.search_parsing import search_parser
@@ -418,6 +419,15 @@ def render_artin_representation_webpage(label):
     info = {} # for testing
 
     if case == 'rep':
+        # Code snippets; never let a failure here break the page
+        try:
+            code = the_rep.make_code_snippets()
+        except Exception:
+            code = None
+        downloads = []
+        if code is not None:
+            downloads.append(("Magma commands", url_for(".artin_code_download", label=label, download_type="magma")))
+        downloads.append(("Underlying data", url_for(".artin_data", label=orblabel)))
         return render_template(
             "artin-representation-show.html",
             title=title,
@@ -428,7 +438,8 @@ def render_artin_representation_webpage(label):
             wnf=wnf,
             proj_wnf=proj_wnf,
             properties=properties,
-            downloads=[("Underlying data", url_for(".artin_data", label=orblabel))],
+            code=code,
+            downloads=downloads,
             info=info,
             learnmore=learnmore_list(),
             KNOWL_ID="artin.%s" % label,
@@ -450,6 +461,23 @@ def render_artin_representation_webpage(label):
         learnmore=learnmore_list(),
         KNOWL_ID="artin.%s" % label,
     )
+
+sorted_code_names = ['rep', 'dimension', 'group', 'conductor', 'indicator',
+                     'artin_field', 'galois_orbit', 'determinant', 'poly',
+                     'gens', 'character', 'euler_factors', 'lseries', 'root_number']
+
+@artin_representations_page.route("/<label>/download/<download_type>")
+def artin_code_download(label, download_type):
+    if download_type not in ['magma'] or not LABEL_RE.match(label):
+        return abort(404, f"Invalid download request for {label}")
+    try:
+        the_rep = ArtinRepresentation(label)
+        code = CodeSnippet(the_rep.make_code_snippets())
+        response = make_response(code.export_code(label, download_type, sorted_code_names))
+    except Exception as err:
+        return abort(404, str(err))
+    response.headers['Content-type'] = 'text/plain'
+    return response
 
 @artin_representations_page.route("/data/<label>")
 def artin_data(label):
