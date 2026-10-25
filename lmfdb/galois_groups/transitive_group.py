@@ -309,6 +309,11 @@ class WebGaloisGroup:
             for lang in self.code[prop]:
                 self.code[prop][lang] = self.code[prop][lang].format(**{'n':self.n(), 't':self.t()})
         self.code['show'] = { lang:'' for lang in self.code['prompt'] }
+
+        # Group identification only works for groups with a GAP id (their abstract label is N.i)
+        if not re.fullmatch(r"\d+\.\d+", str(self._data.get('abstract_label', ''))):
+            self.code['id'] = {}
+        
         # For transitive groups of degree 32, the user needs to load an extra package
         n32_dbs = self.code["n32_dbs"]
 
