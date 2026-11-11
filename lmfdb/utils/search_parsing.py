@@ -1260,6 +1260,119 @@ def input_string_to_poly(FF):
         return None, F, FF
 
 
+# Characters that people paste from rendered pages (MathJax, Unicode math).
+# They are translated before anything else, so that e.g. Q(√5) is not
+# silently read as Q(5) after non-ASCII characters are dropped.
+_NF_UNICODE = {
+    "\u2212": "-",      # minus sign
+    "\u221a": "sqrt",   # √
+    "\u221b": "cbrt",   # ∛
+    "\u03b6": "zeta",   # ζ
+    "\u211a": "Q",      # ℚ
+    "\u03c6": "phi",    # φ
+    "\u03d5": "phi",    # ϕ
+    "\u00b7": "*",      # ·
+    "\u22c5": "*",      # ⋅
+    "\u00d7": "*",      # ×
+    "\u207a": "+",      # superscript plus
+}
+
+# Bound on the work done for one nickname: the product of the degrees of all
+# radicals used, times phi(lcm of the orders of all roots of unity used).
+# It is an upper bound for the degree of the field built by QQbar.
+NF_NICKNAME_MAX_WORK = 2000
+# Bounds on the size of numbers in a nickname
+NF_NICKNAME_MAX_EXPONENT = 10000
+NF_NICKNAME_MAX_INTEGER_DIGITS = 60
+# Seconds allowed for building the field of a nickname (main thread only)
+NF_NICKNAME_TIME_LIMIT = 10
+
+
+def _latex_nth_roots(s):
+    r"""Rewrite sqrt[n](x) (from LaTeX \sqrt[n]{x}) as root(x,n)."""
+    out = []
+    i = 0
+    while True:
+        j = s.find("sqrt[", i)
+        if j < 0:
+            out.append(s[i:])
+            return "".join(out)
+        k = s.find("]", j)
+        if k < 0 or k + 1 >= len(s) or s[k + 1] != "(":
+            raise SearchParsingError("Could not read the n-th root in '%s'." % s)
+        n = s[j + 5:k]
+        depth = 0
+        for m in range(k + 1, len(s)):
+            if s[m] == "(":
+                depth += 1
+            elif s[m] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+        else:
+            raise SearchParsingError("Unbalanced parentheses in '%s'." % s)
+        inner = _latex_nth_roots(s[k + 2:m])
+        out.append(s[i:j] + "root(%s,%s)" % (inner, n))
+        i = m + 1
+
+
+def _normalize_nf_string(s):
+    """
+    Translate Unicode and LaTeX input into the plain syntax read by
+    nf_string_to_label, e.g. \\Q(\\sqrt[3]{-2}) -> Q(root(-2,3)), Q(√5) -> Q(sqrt5).
+    """
+    for k, v in _NF_UNICODE.items():
+        s = s.replace(k, v)
+    bad = re.findall(r"[^\x00-\x7f]", s)
+    if bad:
+        raise SearchParsingError("Unrecognised character '%s' in the field." % bad[0])
+    s = re.sub(r"\\mathbb\s*\{?Q\}?|\\mathbf\s*\{?Q\}?", "Q", s)
+    for tex in ["\\left", "\\right", "\\,", "\\!", "\\ "]:
+        s = s.replace(tex, "")
+    s = s.replace("\\cdot", "*").replace("\\times", "*").replace("\\", "")
+    s = s.replace("{", "(").replace("}", ")")
+    s = re.sub(r"zeta_\(", "zeta(", s)
+    return _latex_nth_roots(s)
+
+
+def _split_top_level_commas(s):
+    pieces, depth, start = [], 0, 0
+    for i, ch in enumerate(s):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            pieces.append(s[start:i])
+            start = i + 1
+    pieces.append(s[start:])
+    return [p.strip() for p in pieces]
+
+
+def _paren_groups(s):
+    """If s is (a)(b)...(c) with at least two groups, return [a, b, ..., c], else None."""
+    groups, depth, start = [], 0, 0
+    for i, ch in enumerate(s):
+        if ch == "(":
+            if depth == 0:
+                if i != start:
+                    return None
+                start = i + 1
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth < 0:
+                return None
+            if depth == 0:
+                groups.append(s[start:i])
+                start = i + 1
+        elif depth == 0:
+            return None
+    if depth != 0 or start != len(s) or len(groups) < 2:
+        return None
+    return groups
+
+
 def _strip_matching_outer_parens(s):
     """Remove only parentheses that wrap the entire string, preserving inner grouping."""
     while len(s) >= 2 and s[0] == "(" and s[-1] == ")":
@@ -1280,14 +1393,14 @@ def _strip_matching_outer_parens(s):
     return s
 
 
-def _nf_string_to_qqbar(s):
+def _nf_string_to_qqbar(s, work=None):
     """
     Converts a string into an algebraic element in QQbar.
 
     Supported syntax:
     - binary operators: +, -, *, /, ^ (exponentiation)
     - unary operators: +, -
-    - functions: sqrt(...), root(...), cbrt(...)
+    - functions: sqrt(x), cbrt(x), root(x, n) (n-th root), root(x) (= sqrt(x), for backwards compatibility)
     - zeta roots of unity: zeta(...), zeta_N, zetaN
     - imaginary unit: i
     - golden ratio constant: phi = (1 + sqrt(5))/2
@@ -1295,21 +1408,31 @@ def _nf_string_to_qqbar(s):
     - nth-roots via exponentiation: base^(1/n), e.g., 2^(1/3), phi^(3/4)
     - nested parentheses and combinations of the above
 
-    The expression is safely parsed with a restricted Python AST and then evaluated as a Sage object in QQbar.
+    Square roots of negative numbers are i times the positive root.  Odd roots
+    of negative real numbers are real (cbrt(-8) = -2, (-2)^(1/3) = -2^(1/3));
+    otherwise roots are principal (the one with the smallest argument).
 
-    Examples: sqrt2, sqrt2 + cbrt3, zeta4 - 1/phi, sqrt(2 + 3*sqrt(2)), 2^(1/3), phi^(3/4)
+    ``work`` is a dict used to bound the degree of the field (see NF_NICKNAME_MAX_WORK).
 
+    Examples: sqrt2, sqrt2 + cbrt3, zeta4 - 1/phi, sqrt(2 + 3*sqrt(2)), 2^(1/3), phi^(3/4), root(2, 5)
     """
+    from sage.all import AA, lcm, euler_phi
 
     s = s.lower().strip().replace(" ", "")
     if not s:
         raise SearchParsingError("The algebraic expression is empty.")
+    if work is None:
+        work = {"radicals": 1, "zeta_order": 1, "seen": set()}
 
     def _normalize_radicals(t):
+        # Separate i from a following function or bracket: isqrt3 -> i*sqrt3, 2i(1+i) -> 2i*(1+i)
+        t = re.sub(r"(?<![a-z_])i(?=sqrt|cbrt|root|zeta|phi|\()", "i*", t)
         # Convert shorthand like sqrt5, root-3, cbrt7 into function-call form: sqrt(5), root(-3), cbrt(7).
-        t = re.sub(r"\b(sqrt|root|cbrt)([+-]?\d+)\b", r"\1(\2)", t)
+        t = re.sub(r"(?<![a-z_])(sqrt|root|cbrt)([+-]?\d+)", r"\1(\2)", t)
         # Convert zeta shorthand like zeta5 or zeta_5 into zeta(5).
-        t = re.sub(r"\bzeta_?(\d+)\b", r"zeta(\1)", t)
+        t = re.sub(r"(?<![a-z_])zeta_?(\d+)", r"zeta(\1)", t)
+        # Implicit multiplication, as in displayed names: 2sqrt(3) -> 2*sqrt(3), sqrt(2)sqrt(3), 2i, (1+i)(1-i)
+        t = implicit_mul(t).replace(")(", ")*(")
         # Convert ^ to ** for exponentiation (Python uses ** for exponentiation)
         t = t.replace("^", "**")
         return t
@@ -1321,19 +1444,52 @@ def _nf_string_to_qqbar(s):
     except SyntaxError as err:
         raise SearchParsingError(f"Could not parse algebraic expression '{s}': {err.msg}")
 
+    def _check_work():
+        bound = work["radicals"] * euler_phi(work["zeta_order"])
+        if bound > NF_NICKNAME_MAX_WORK:
+            raise SearchParsingError("This expression is too large: it could define a field of degree up to %s." % bound)
+
+    def _root(x, n, key):
+        # n-th root of x, with real odd roots of negative reals
+        n = ZZ(n)
+        if n <= 0 or n > NF_NICKNAME_MAX_EXPONENT:
+            raise SearchParsingError("Roots must have a positive index of at most %s." % NF_NICKNAME_MAX_EXPONENT)
+        if n == 1:
+            return x
+        if (key, n) not in work["seen"]:  # count each distinct radical once
+            work["seen"].add((key, n))
+            work["radicals"] *= n
+            _check_work()
+        if n % 2 == 1 and x.imag().is_zero() and AA(x) < 0:
+            return -QQbar(AA(-x).nth_root(n))
+        return x.nth_root(n)
+
+    def _as_integer(v, what):
+        try:
+            q = QQ(v)
+        except (TypeError, ValueError):
+            raise SearchParsingError(f"{what} must be an integer.")
+        if q not in ZZ:
+            raise SearchParsingError(f"{what} must be an integer.")
+        return ZZ(q)
+
     def _eval_ast(n):
         if isinstance(n, ast.Expression):
             return _eval_ast(n.body)
         if isinstance(n, ast.Constant):
             val = n.value
-            if isinstance(val, int):
+            if isinstance(val, int) and not isinstance(val, bool):
+                if len(str(abs(val))) > NF_NICKNAME_MAX_INTEGER_DIGITS:
+                    raise SearchParsingError("Integers in field names can have at most %s digits." % NF_NICKNAME_MAX_INTEGER_DIGITS)
                 return QQbar(QQ(val))
-            raise SearchParsingError("Only numeric constants are supported in algebraic expressions.")
+            raise SearchParsingError("Only integer constants are supported in algebraic expressions (write 3/2 rather than 1.5).")
         if isinstance(n, ast.Name):
             if n.id == "i":
+                work["zeta_order"] = lcm(work["zeta_order"], 4)
+                _check_work()
                 return QQbar.zeta(4)
             if n.id == "phi":
-                return (QQbar(1) + QQbar(5).sqrt()) / 2
+                return (1 + _root(QQbar(5), 2, "phi")) / 2
             raise SearchParsingError(f"Unsupported symbol '{n.id}' in algebraic expressions.")
         if isinstance(n, ast.UnaryOp):
             v = _eval_ast(n.operand)
@@ -1356,15 +1512,17 @@ def _nf_string_to_qqbar(s):
                     raise SearchParsingError("Division by zero in algebraic expression.")
                 return left / right
             if isinstance(n.op, ast.Pow):
-                # Support for arbitrary nth-roots via exponentiation: base^(exponent)
-                # The exponent should be a rational number for algebraic evaluation
+                # base^(p/q) = (q-th root of base)^p
                 try:
-                    exp_rational = QQ(right)
+                    e = QQ(right)
                 except (TypeError, ValueError):
                     raise SearchParsingError(f"Exponent must be a rational number, got {right}.")
-                # Use QQbar's power operator to handle rational exponents
-                # This computes base^exp_rational in QQbar
-                return left ** exp_rational
+                p, q = e.numerator(), e.denominator()
+                if abs(p) > NF_NICKNAME_MAX_EXPONENT:
+                    raise SearchParsingError("Exponents can be at most %s." % NF_NICKNAME_MAX_EXPONENT)
+                if left == 0 and p < 0:
+                    raise SearchParsingError("Division by zero in algebraic expression.")
+                return _root(left, q, ast.dump(n.left)) ** p
             raise SearchParsingError("Unsupported binary operator in algebraic expression.")
         if isinstance(n, ast.Call):
             if not isinstance(n.func, ast.Name):
@@ -1372,21 +1530,23 @@ def _nf_string_to_qqbar(s):
             fname = n.func.id
             if fname not in {"sqrt", "root", "cbrt", "zeta"}:
                 raise SearchParsingError(f"Unsupported function '{fname}' in algebraic expression.")
-            if len(n.args) != 1 or n.keywords:
-                raise SearchParsingError(f"Function '{fname}' takes exactly one argument.")
+            if n.keywords or not (len(n.args) == 1 or (fname == "root" and len(n.args) == 2)):
+                raise SearchParsingError(f"Function '{fname}' takes exactly one argument (root takes one or two).")
             arg = _eval_ast(n.args[0])
-            if fname in {"sqrt", "root"}:
-                return arg.sqrt()
-            if fname == "zeta":
-                try:
-                    n_q = QQ(arg)
-                    n_int = ZZ(n_q)
-                except (TypeError, ValueError):
-                    raise SearchParsingError("zeta(...) requires a positive integer argument.")
-                if n_q != n_int or n_int <= 0:
-                    raise SearchParsingError("zeta(...) requires a positive integer argument.")
-                return QQbar.zeta(n_int)
-            return arg.nth_root(3)
+            key = ast.dump(n.args[0])
+            if fname == "sqrt" or (fname == "root" and len(n.args) == 1):
+                return _root(arg, 2, key)
+            if fname == "root":
+                return _root(arg, _as_integer(_eval_ast(n.args[1]), "The index of root(x, n)"), key)
+            if fname == "cbrt":
+                return _root(arg, 3, key)
+            # zeta
+            m = _as_integer(arg, "The argument of zeta(...)")
+            if m <= 0:
+                raise SearchParsingError("zeta(...) requires a positive integer argument.")
+            work["zeta_order"] = lcm(work["zeta_order"], m)
+            _check_work()
+            return QQbar.zeta(m)
         raise SearchParsingError("Unsupported syntax in algebraic expression.")
 
     try:
@@ -1397,6 +1557,33 @@ def _nf_string_to_qqbar(s):
         raise SearchParsingError(f"Could not evaluate algebraic expression '{s}': {err}")
 
 
+def _field_from_algebraics(alphas):
+    """
+    Defining polynomial of the field generated by ``alphas`` (elements of QQbar).
+    """
+    from sage.rings.qqbar import number_field_elements_from_algebraics
+    from cysignals.alarm import alarm, cancel_alarm, AlarmInterrupt
+    import threading
+
+    # SIGALRM only works in the main thread; elsewhere the work bound in
+    # _nf_string_to_qqbar is the only protection.
+    use_alarm = threading.current_thread() is threading.main_thread()
+    try:
+        if use_alarm:
+            alarm(NF_NICKNAME_TIME_LIMIT)
+        # minimal=True is essential: otherwise Sage may return a larger field,
+        # e.g. Q(zeta_7) for Q(zeta_7 + zeta_7^2 + zeta_7^4) = Q(sqrt(-7)).
+        K, _, _ = number_field_elements_from_algebraics(alphas, minimal=True)
+    except AlarmInterrupt:
+        raise SearchParsingError("Computing this field took too long.")
+    except (RecursionError, ArithmeticError, ValueError, TypeError) as err:
+        raise SearchParsingError("Could not compute the field: %s" % err)
+    finally:
+        if use_alarm:
+            cancel_alarm()
+    return PolynomialRing(QQ, 'x')(K.defining_polynomial())
+
+
 def nf_string_to_label(FF):
     """
     Converts a number field nickname, polynomial, or label to the corresponding LMFDB label (in the format "d.r.D.n").
@@ -1404,9 +1591,12 @@ def nf_string_to_label(FF):
     Supports custom nicknames of the form Q(s1, s2, ..., sk) where each si is a string representing an algebraic expression
     Uses _nf_string_to_qqbar to safely parse algebraic expressions into elements in QQbar.
     Uses number_field_elements_from_algebraics to compute the minimal number field containing the specified elements.
+    Also accepts LaTeX (\\Q(\\sqrt{-3}), \\Q(\\zeta_{7})^+, \\Q(\\sqrt[3]{2})) and Unicode (Q(√5), Q(ζ5)).
 
-    Examples: Q, Qsqrt2, Qsqrt-4, Qzeta5, Q(sqrt2+sqrt3), Qcbrt2, Q(sqrt(2 + 3*sqrt2)), Q(sqrt2, cbrt3), Q(2^(1/5)), etc.
+    Examples: Q, Qsqrt2, Qsqrt-4, Qzeta5, Qzeta7+, Q(sqrt2+sqrt3), Qcbrt2, Q(sqrt(2 + 3*sqrt2)), Q(sqrt2, cbrt3), Q(2^(1/5)), etc.
     """
+
+    FF = _normalize_nf_string(FF.strip())
 
     # Check if the rationals Q or Q(i)
     if FF in ["q", "Q"]:
@@ -1435,12 +1625,12 @@ def nf_string_to_label(FF):
 
         # Case 1: Check if input is quadratic field (given in the form Qsqrt5 or Q(sqrt5))
         if re.match(r'^(sqrt|root)[+-]?\d+$', Fstrip):
-            try:
-                d = integer_squarefree_part(ZZ(str(Fstrip[4:])))
-            except (TypeError, ValueError):
-                d = 0
+            if len(Fstrip) - 4 > NF_NICKNAME_MAX_INTEGER_DIGITS:
+                raise SearchParsingError("Integers in field names can have at most %s digits." % NF_NICKNAME_MAX_INTEGER_DIGITS)
+            d = ZZ(Fstrip[4:])
             if d == 0:
                 raise SearchParsingError("After {0}, the remainder must be a nonzero integer.  Use {0}5 or {0}-11 for example.".format(Fstrip[:4]))
+            d = integer_squarefree_part(d)
             if d == 1:
                 return "1.1.1.1"
             if d % 4 in [2, 3]:
@@ -1451,18 +1641,16 @@ def nf_string_to_label(FF):
             s = 0 if D < 0 else 2
             return "2.%s.%s.1" % (s, str(absD))
 
-        # Case 2: Check if cyclotomic field (or its maximal real subfield)
-        if Fstrip[:4] == "zeta" and re.match(r"^qzeta\d+(\+|plus)?$", F.replace("_", "")):
-            match_obj = re.match(r"^qzeta(\d+)(\+|plus)?$", F.replace("_", ""))
-            if not match_obj:
-                raise SearchParsingError("After {0}, the remainder must be a positive integer or a positive integer followed by '+'.  Use {0}5 or {0}19+, for example.".format(F[:5]))
-
-            d = ZZ(str(match_obj.group(1)))
+        # Case 2: Check if cyclotomic field (or its maximal real subfield):
+        # Qzeta5, Qzeta_5, Q(zeta5), Qzeta7+, Qzeta7plus, Q(zeta7)+, Q(zeta_(7))^+
+        match_obj = re.match(r"^q(?:zeta_?(\d+)|\(zeta_?(\d+)\)|zeta_?\((\d+)\)|\(zeta_?\((\d+)\)\))(\^?\+|plus)?$", F)
+        if match_obj:
+            d = ZZ(next(g for g in match_obj.groups()[:4] if g))
             if d % 4 == 2:
-                d /= 2  # Q(zeta_6)=Q(zeta_3), etc)
+                d //= 2  # Q(zeta_6)=Q(zeta_3), etc)
 
             # Check if matches maximal real subfield of a cyclotomic field
-            if match_obj.group(2):
+            if match_obj.group(5):
                 from lmfdb.number_fields.web_number_field import rcyclolookup
 
                 if d in rcyclolookup:
@@ -1481,15 +1669,16 @@ def nf_string_to_label(FF):
         # Case 3: Use generic algebraic nickname parser for Q(...), Qsqrt..., Qcbrt..., etc.
         from lmfdb.number_fields.number_field import poly_to_field_label
 
-        # Support comma-separated generators Q(s1, s2, ..., sk).
-        pieces = [piece.strip() for piece in Fstrip.split(",")]
+        # Support comma-separated generators Q(s1, s2, ..., sk), and towers Q(s1)(s2)...(sk).
+        pieces = []
+        for group in _paren_groups(F[1:]) or [Fstrip]:
+            pieces += _split_top_level_commas(group)
         if any(not piece for piece in pieces):
             raise SearchParsingError("Empty generator in comma-separated field nickname.")
 
-        from sage.rings.qqbar import number_field_elements_from_algebraics
-        alphas = [_nf_string_to_qqbar(piece) for piece in pieces]
-        K, _, _ = number_field_elements_from_algebraics(alphas)
-        pol = PolynomialRing(QQ, 'x')(K.defining_polynomial())
+        work = {"radicals": 1, "zeta_order": 1, "seen": set()}
+        alphas = [_nf_string_to_qqbar(piece, work) for piece in pieces]
+        pol = _field_from_algebraics(alphas)
         if pol.degree() <= 1:
             return "1.1.1.1"
         label = poly_to_field_label(pol)
@@ -1497,7 +1686,7 @@ def nf_string_to_label(FF):
             return label
         raise SearchParsingError("%s is not in the database." % FF)
 
-    # Expand out factored labels, like 11.11.11e20.1
+    # Expand out factored labels, like 11.11.11e20.1 or 6.0.2e4t3e3.1
     from lmfdb.number_fields.number_field import FIELD_LABEL_RE
 
     if not FIELD_LABEL_RE.match(F):
@@ -1507,13 +1696,11 @@ def nf_string_to_label(FF):
     def raise_power(ab):
         if ab.count("e") == 0:
             return ZZ(ab)
-        elif ab.count("e") == 1:
-            a, b = ab.split("e")
-            return ZZ(a) ** ZZ(b)
-        else:
-            raise SearchParsingError("Malformed absolute discriminant.  It must be a sequence of strings AeB for A and B integers, joined by _s.  For example, 2e7_3e5_11.")
+        a, b = ab.split("e")
+        return ZZ(a) ** ZZ(b)
 
-    parts[2] = str(prod(raise_power(c) for c in parts[2].split("_")))
+    # FIELD_LABEL_RE only lets through factors AeB joined by t (e.g. 2e4t3e3)
+    parts[2] = str(prod(raise_power(c) for c in parts[2].split("t")))
     return ".".join(parts)
 
 # Similar to parsing a number field name, but with different output,
