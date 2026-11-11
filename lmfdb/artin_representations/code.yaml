@@ -1,0 +1,95 @@
+prompt:
+  magma:  'magma'
+
+# Valid keys are: 'all' any key appearing in prompt, and 'rest'
+frontmatter:
+  all: |
+    {lang} code for working with Artin representation {label}.
+  rest: |
+    Some of these functions may take a long time to execute (this depends on the representation).
+
+# The placeholders {field}, {zeta}, {primes}, {traces} and {dim} in 'rep'
+# are filled in by ArtinRepresentation.make_code_snippets() in math_classes.py.
+rep:
+  comment: Define the Artin representation
+  magma: |
+    R<x> := PolynomialRing(Rationals()); K := {field};
+    // Pick out rho among the irreducible Artin representations of the Galois closure of K,
+    // using its dimension, faithfulness, and its traces of Frobenius at the primes ps.
+    {zeta}
+    ps := {primes}; traces := {traces};
+    rho := [A : A in ArtinRepresentations(K) | Dimension(A) eq {dim} and #Kernel(Character(A)) eq 1 and forall{j : j in [1..#ps] | Abs(Coefficient(EulerFactor(A, ps[j] : R := ComplexField()), 1) + traces[j]) lt 10^-10}][1];
+
+dimension:
+  comment: Dimension
+  magma: Dimension(rho);
+
+group:
+  comment: Galois group of the Galois closure of K, and its transitive group label
+  magma: G := Group(rho); GroupName(G); TransitiveGroupIdentification(G);
+
+conductor:
+  comment: Conductor
+  magma: Conductor(rho);
+
+indicator:
+  comment: Frobenius-Schur indicator
+  magma: Indicator(Character(rho));
+
+root_number:
+  comment: Root number
+  magma: Sign(LSeries(rho));
+
+artin_field:
+  comment: Artin field (rho factors through the Galois closure of this field)
+  magma: Field(rho);
+
+galois_orbit:
+  comment: Size of the Galois orbit of rho
+  magma: Degree(CharacterField(Character(rho)));
+
+determinant:
+  comment: Determinant, as a Dirichlet character
+  magma: DirichletCharacter(Determinant(rho));
+
+poly:
+  comment: Defining polynomial
+  magma: DefiningPolynomial(K);
+
+gens:
+  comment: Generators of the Galois action on the roots (Magma may order the roots differently)
+  magma: Generators(Group(rho));
+
+character:
+  comment: Character values (conjugacy classes are ordered as in Magma, which may differ from the LMFDB)
+  magma: Character(rho);
+
+euler_factors:
+  comment: Euler factors at small primes
+  magma: "[<p, EulerFactor(rho, p)> : p in PrimesUpTo(20)];"
+
+lseries:
+  comment: L-function and its first Dirichlet coefficients
+  magma: L := LSeries(rho); LGetCoefficients(L, 20);
+
+
+# specify which code snippets to test
+snippet_test:
+  test_trivial:
+    label: 1.1.1t1.a.a
+    url: ArtinRepresentation/1.1.1t1.a.a/download/{lang}
+  test_cubic_char:
+    label: 1.7.3t1.a.a
+    url: ArtinRepresentation/1.7.3t1.a.a/download/{lang}
+  test_cubic_char_conj:
+    label: 1.7.3t1.a.b
+    url: ArtinRepresentation/1.7.3t1.a.b/download/{lang}
+  test_S3:
+    label: 2.23.3t2.b.a
+    url: ArtinRepresentation/2.23.3t2.b.a/download/{lang}
+  test_D5:
+    label: 2.47.5t2.a.a
+    url: ArtinRepresentation/2.47.5t2.a.a/download/{lang}
+  test_D5_conj:
+    label: 2.47.5t2.a.b
+    url: ArtinRepresentation/2.47.5t2.a.b/download/{lang}
